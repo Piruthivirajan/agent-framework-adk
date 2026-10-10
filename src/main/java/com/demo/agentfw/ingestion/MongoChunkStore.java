@@ -46,7 +46,8 @@ public class MongoChunkStore implements ChunkStore {
         this.collection = database.getCollection(collectionName);
     }
 
-    MongoCollection<Document> collection() {
+    /** The chunks collection, for components that run their own queries (retrieval). */
+    public MongoCollection<Document> collection() {
         return collection;
     }
 

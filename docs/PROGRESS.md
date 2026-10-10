@@ -40,7 +40,7 @@ Decisions: reranker `ms-marco-MiniLM-L6-v2` fp32 as baseline, int8 chosen only i
 
 - [x] 0. Corpus fetch script, compose robustness, ingest the real corpus
 - [x] 1. Reranker: `ModelFiles` (download + sha256), `CrossEncoderReranker`, fp32 vs int8 comparison
-- [ ] 2. Retrieval core: `RANK` / `SCORE` / `JAVA_RRF`, config, Mongo integration test
+- [x] 2. Retrieval core: `RANK` / `SCORE` / `JAVA_RRF`, config, Mongo integration test
 - [ ] 3. `RetrievalTrace` and `RetrievalService` with the grounding gate
 - [ ] 4. Calibration question set (drafted, **waiting for the user's review**), then calibration run, `docs/CALIBRATION.md`
 - [ ] 5. Smoke at retrieval level
@@ -56,6 +56,13 @@ Decisions: reranker `ms-marco-MiniLM-L6-v2` fp32 as baseline, int8 chosen only i
 ## Log
 
 <!-- Newest first. One entry per task: date, what was built, what was verified. -->
+
+### 2026-10-10: Day 3 step 2, retrieval core
+- `AtlasChunkSearch` runs vector (`$vectorSearch`, numCandidates 400, limit 20, tenant filter) and BM25 (`$search` compound with a tenant `equals` filter, limit 20) and fuses them three ways: `RANK` (`$rankFusion`), `SCORE` (`$scoreFusion`, sigmoid) or `JAVA_RRF` (two queries, fused in Java). The strategy is a config default and a per-call override (the Day 7 eval uses that).
+- Native fusion cuts to the largest possible union (2 x 20) before projecting, so per-pipeline hit counts parsed from `scoreDetails` are exact; only then is the list cut to the fused 20. `$scoreFusion` reports raw scores, not ranks, so ranks are derived per pipeline.
+- `RetrievalProperties` holds every funnel number, with `rerankDepth` configurable (default 20; the depth experiment decides 12). `minRerankScore` is nullable on purpose: null means "not calibrated", never a guessed number.
+- Verified against the live Atlas container on the Day 1 toy data: all three strategies rank the refund chunk first; `$rankFusion` gives the same 2/61 score as the Day 1 spike; Java RRF reproduces the native scores and ranking exactly; another tenant's matching chunk never comes back; a query with no lexical match still gets vector candidates.
+- Verified: BUILD SUCCESS, 80 tests (6 against MongoDB, 4 with the real model).
 
 ### 2026-10-10: Day 3 steps 0 and 1, corpus, compose, reranker
 - **Corpus:** gitignored; `scripts/fetch-corpus.sh` downloads the 7 PDFs from official AWS URLs and verifies a sha256 each (`scripts/corpus-manifest.tsv`; `--check` only reports). 6 of 7 match the current docs.aws.amazon.com files byte for byte. `microservices-on-aws.pdf` is the **ARCHIVED 2021 edition** from d1.awsstatic.com (title "ARCHIVED: Implementing Microservices on AWS"); the current docs edition is a different file, so the manifest pins the archived one.
