@@ -4,5 +4,22 @@ services:
     # Pinned after the Day 1 spike passed: MongoDB 8.3.11, build of 2026-09-28.
     # The plain "8.3.11" tag is re-pushed on rebuilds; the timestamped tag is not.
     image: mongodb/mongodb-atlas-local:8.3.11-20260928T091948Z
+    # The replica set config records the hostname of the member. Docker's default hostname is the
+    # container id, which changes on every recreate, so a recreated container could not find its
+    # own replica set (exit code 2, ReplicaSetNoPrimary). A fixed hostname keeps the data usable.
+    hostname: agentfw-mongo
     ports:
       - "27017:27017"
+    volumes:
+      # /data/db and /data/configdb are the paths the image declares as VOLUME; /data/mongot is not
+      # declared but holds the search process state (index definitions and index data). Without it a
+      # recreated container keeps its documents but loses its search indexes.
+      # Named volumes survive `down` and recreate; `docker compose down -v` deliberately wipes them.
+      - atlas-db:/data/db
+      - atlas-configdb:/data/configdb
+      - atlas-mongot:/data/mongot
+
+volumes:
+  atlas-db:
+  atlas-configdb:
+  atlas-mongot:
