@@ -41,7 +41,7 @@ Decisions: reranker `ms-marco-MiniLM-L6-v2` fp32 as baseline, int8 chosen only i
 - [x] 0. Corpus fetch script, compose robustness, ingest the real corpus
 - [x] 1. Reranker: `ModelFiles` (download + sha256), `CrossEncoderReranker`, fp32 vs int8 comparison
 - [x] 2. Retrieval core: `RANK` / `SCORE` / `JAVA_RRF`, config, Mongo integration test
-- [ ] 3. `RetrievalTrace` and `RetrievalService` with the grounding gate
+- [x] 3. `RetrievalTrace` and `RetrievalService` with the grounding gate
 - [ ] 4. Calibration question set (drafted, **waiting for the user's review**), then calibration run, `docs/CALIBRATION.md`
 - [ ] 5. Smoke at retrieval level
 
@@ -56,6 +56,13 @@ Decisions: reranker `ms-marco-MiniLM-L6-v2` fp32 as baseline, int8 chosen only i
 ## Log
 
 <!-- Newest first. One entry per task: date, what was built, what was verified. -->
+
+### 2026-10-10: Day 3 step 3, trace and grounding gate
+- `RetrievalService.retrieve(query)` runs: embed, search and fuse (top 20), rerank the first `rerankDepth`, keep `finalTopN`, gate. `retrieve(query, settings)` takes per-call settings (fusion, depth), which the calibration and the Day 7 eval use.
+- `RetrievalTrace` (plain records, serializes with Jackson 3) holds: the settings in force and model names; `embedMillis`; search: strategy, vector hits, text hits, union size, per-stage ms, and the fused top 20 each with fused rank, file, page, 160-char snippet, fused score and per-pipeline rank and score; rerank: model, pairs scored, truncated pairs, ms, and every scored pair with rerank score and its fused rank; grounding: top score, threshold, margin, decision; `totalMillis` and a `stageMillis()` timeline. Full passages are only in `RetrievedChunk`, never in the trace and never in logs.
+- Gate: top-1 rerank score against the threshold; no candidates means `NO_RELEVANT_CONTEXT`; **no threshold set means `NOT_CALIBRATED`** (chunks are returned for inspection, a WARN is logged at startup). The vector similarity is deliberately not used (compressed scale, shown on Day 2).
+- Each stage logs one INFO line with counts and ms (no question or passage text).
+- Verified: BUILD SUCCESS, 93 tests.
 
 ### 2026-10-10: Day 3 step 2, retrieval core
 - `AtlasChunkSearch` runs vector (`$vectorSearch`, numCandidates 400, limit 20, tenant filter) and BM25 (`$search` compound with a tenant `equals` filter, limit 20) and fuses them three ways: `RANK` (`$rankFusion`), `SCORE` (`$scoreFusion`, sigmoid) or `JAVA_RRF` (two queries, fused in Java). The strategy is a config default and a per-call override (the Day 7 eval uses that).

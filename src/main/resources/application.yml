@@ -23,6 +23,19 @@ agentfw:
     model-dir: models/ms-marco-MiniLM-L-6-v2       # gitignored; downloaded and sha256-verified on first start
     model-file: model.onnx                         # fp32; or model_quint8_avx2.onnx (int8)
     max-length: 512
+  retrieval:
+    fusion: RANK                 # RANK ($rankFusion) | SCORE ($scoreFusion) | JAVA_RRF
+    num-candidates: 400          # MongoDB guidance: at least 20x the limit
+    per-pipeline-limit: 20
+    fused-limit: 20
+    rerank-depth: 20             # how many fused candidates the cross-encoder scores; 12 is measured against 20
+    final-top-n: 5
+    vector-weight: 1.0
+    text-weight: 1.0
+    normalization: sigmoid       # $scoreFusion only
+    rrf-k: 60
+    # min-rerank-score: set from the calibration (docs/CALIBRATION.md). Unset means "not calibrated",
+    # and the grounding gate reports NOT_CALIBRATED instead of guessing.
   ingestion:
     corpus-dir: corpus
     on-startup: false
