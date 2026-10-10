@@ -30,7 +30,7 @@ Source of truth for scope: [PLAN.md](PLAN.md). Update this file after every task
 - [x] 1. Config, `EmbeddingService`, Gemini implementation, fake, tests
 - [x] 2. `PdfLoader` and tests
 - [x] 3. `Chunker` and tests
-- [ ] 4. `ChunkStore`, `MongoChunkStore`, index initializer, Mongo integration test
+- [x] 4. `ChunkStore`, `MongoChunkStore`, index initializer, Mongo integration test
 - [ ] 5. `IngestionJob`, startup trigger, tests
 - [ ] 6. Manual smoke run on the placeholder PDFs (`corpus-sample/`)
 
@@ -41,6 +41,13 @@ Source of truth for scope: [PLAN.md](PLAN.md). Update this file after every task
 ## Log
 
 <!-- Newest first. One entry per task: date, what was built, what was verified. -->
+
+### 2026-10-10: Day 2 step 4, MongoDB storage and search indexes
+- `ChunkStore` is the port the ingestion job will depend on; `MongoChunkStore` implements it with the plain driver. `replaceDocument` runs delete + insert in one transaction (works because Atlas local is a replica set), so a reader sees the old chunks or the new ones, never a mix; a failed insert rolls back (tested with a deliberate unique-index violation).
+- Unique index `(tenantId, docId, chunkIndex)` is a safety net against duplicates. `docStates` is one `$group` aggregation returning distinct `contentHash` and `embeddingModel` per document, which is what "skip or re-embed" needs.
+- `ChunkIndexInitializer` creates `chunk_vector` (cosine, `numDimensions` from the embedding service, `tenantId` as filter) and `chunk_text` (`lucene.english` on `text`, `tenantId` token), the definitions proven on Day 1. It is idempotent, and refuses to continue if an existing vector index has a different dimension, with an instruction to drop the index and re-ingest.
+- Integration test (`MongoChunkStoreTest`) uses a throwaway database `agentfw_test_<random>`, dropped afterwards. Verified both ways: 7 tests run against the live container, and with the container stopped it prints `SKIPPED ... MongoDB not reachable` and the build still succeeds.
+- Verified: BUILD SUCCESS, 45 tests (7 against MongoDB).
 
 ### 2026-10-10: Day 2 step 3, chunking
 - `Chunker` slides a window of 650 estimated tokens (chars / 4) over each page with 15% overlap; chunks never cross a page, so each has one citable page number. Each chunk ends at the best boundary in the last 25% of the window: paragraph break, then sentence end, then space; with no boundary at all it cuts hard (and still terminates).
