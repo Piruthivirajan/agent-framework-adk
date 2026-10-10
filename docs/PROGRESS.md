@@ -28,7 +28,7 @@ Source of truth for scope: [PLAN.md](PLAN.md). Update this file after every task
 ## Day 2: ingestion (steps, each built, tested and committed)
 
 - [x] 1. Config, `EmbeddingService`, Gemini implementation, fake, tests
-- [ ] 2. `PdfLoader` and tests
+- [x] 2. `PdfLoader` and tests
 - [ ] 3. `Chunker` and tests
 - [ ] 4. `ChunkStore`, `MongoChunkStore`, index initializer, Mongo integration test
 - [ ] 5. `IngestionJob`, startup trigger, tests
@@ -41,6 +41,11 @@ Source of truth for scope: [PLAN.md](PLAN.md). Update this file after every task
 ## Log
 
 <!-- Newest first. One entry per task: date, what was built, what was verified. -->
+
+### 2026-10-10: Day 2 step 2, PDF loading
+- `SourceDocument.read(path)` reads the file once and derives `docId` (slug of the file name, stable across edits) and `contentHash` (SHA-256 of the bytes). `PdfLoader.loadPages` returns one `PdfPage(number, text)` per page via PDFBox (`setStartPage/setEndPage` per page), so chunks can carry a real page number for citations.
+- Blank pages are returned with blank text (the Chunker will skip them); scanned PDFs therefore yield empty pages, OCR is out of scope. A corrupt file raises `IllegalStateException` naming the file, so the ingestion job can skip one bad file and continue.
+- Tests build PDFs in memory (`TestPdfs`), no binary fixtures. Verified: BUILD SUCCESS, 26 tests.
 
 ### 2026-10-10: Day 2 step 1, embeddings
 - Model `gemini-embedding-2` at 768 dimensions, one model only (the name stays configurable in `application.yml`). `gemini-embedding-001` is not in the code. Its listed shutdown date is May 14, 2028 (July 14, 2025 is its release date), so retirement was not the reason; one model is simply less to defend.
