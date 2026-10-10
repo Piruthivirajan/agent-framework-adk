@@ -29,7 +29,7 @@ Source of truth for scope: [PLAN.md](PLAN.md). Update this file after every task
 
 - [x] 1. Config, `EmbeddingService`, Gemini implementation, fake, tests
 - [x] 2. `PdfLoader` and tests
-- [ ] 3. `Chunker` and tests
+- [x] 3. `Chunker` and tests
 - [ ] 4. `ChunkStore`, `MongoChunkStore`, index initializer, Mongo integration test
 - [ ] 5. `IngestionJob`, startup trigger, tests
 - [ ] 6. Manual smoke run on the placeholder PDFs (`corpus-sample/`)
@@ -41,6 +41,13 @@ Source of truth for scope: [PLAN.md](PLAN.md). Update this file after every task
 ## Log
 
 <!-- Newest first. One entry per task: date, what was built, what was verified. -->
+
+### 2026-10-10: Day 2 step 3, chunking
+- `Chunker` slides a window of 650 estimated tokens (chars / 4) over each page with 15% overlap; chunks never cross a page, so each has one citable page number. Each chunk ends at the best boundary in the last 25% of the window: paragraph break, then sentence end, then space; with no boundary at all it cuts hard (and still terminates).
+- Resulting sizes: 75% of the target (about 487 tokens) up to target + min tail (650 + 100 = 750 tokens). The plan said "500 to 800"; this is that range within estimation error. A remainder shorter than the min tail is absorbed into the last chunk instead of becoming a tiny chunk that is mostly overlap.
+- No tokenizer on purpose: the model takes 8192 tokens, over 10x the largest chunk, so a chars/4 estimate cannot truncate. Not measured: real token counts of the real corpus.
+- PDF line breaks become spaces, blank lines stay as paragraph breaks; pages under 20 characters (page numbers, blank scans) produce no chunk.
+- Verified: BUILD SUCCESS, 38 tests.
 
 ### 2026-10-10: Day 2 step 2, PDF loading
 - `SourceDocument.read(path)` reads the file once and derives `docId` (slug of the file name, stable across edits) and `contentHash` (SHA-256 of the bytes). `PdfLoader.loadPages` returns one `PdfPage(number, text)` per page via PDFBox (`setStartPage/setEndPage` per page), so chunks can carry a real page number for citations.
