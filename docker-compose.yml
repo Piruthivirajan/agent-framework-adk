@@ -1,6 +1,8 @@
 # Local MongoDB Atlas: mongod + mongot (search process) in one container. Development only.
 services:
   mongodb:
-    image: mongodb/mongodb-atlas-local:latest   # pin the tag once the Day 1 spike passes
+    # Pinned after the Day 1 spike passed: MongoDB 8.3.11, build of 2026-09-28.
+    # The plain "8.3.11" tag is re-pushed on rebuilds; the timestamped tag is not.
+    image: mongodb/mongodb-atlas-local:8.3.11-20260928T091948Z
     ports:
       - "27017:27017"

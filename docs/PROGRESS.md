@@ -18,12 +18,12 @@ Source of truth for scope: [PLAN.md](PLAN.md). Update this file after every task
 
 ## Day 1 spike (done when all checked)
 
-- [ ] Container healthy and `db.version()` noted
-- [ ] Both search indexes show `queryable: true`
-- [ ] `$vectorSearch` alone and `$search` alone each return the refund chunk first
-- [ ] `$rankFusion` and `$scoreFusion` run from Java and print scores, or the Java RRF fallback is chosen
+- [x] Container healthy and `db.version()` noted (8.3.11)
+- [x] Both search indexes show `queryable: true`
+- [x] `$vectorSearch` alone and `$search` alone each return the refund chunk first
+- [x] `$rankFusion` and `$scoreFusion` run from Java and print scores (no Java RRF fallback needed)
 - [ ] The cloud Atlas tier planned for the demo URL is checked for the same MongoDB version
-- [ ] Pin the `mongodb-atlas-local` image tag in docker-compose.yml
+- [x] Pin the `mongodb-atlas-local` image tag in docker-compose.yml (`8.3.11-20260928T091948Z`)
 
 ## Watch list
 
@@ -33,7 +33,15 @@ Source of truth for scope: [PLAN.md](PLAN.md). Update this file after every task
 
 <!-- Newest first. One entry per task: date, what was built, what was verified. -->
 
-### 2026-10-10: Day 1 spike files written (not yet run)
+### 2026-10-10: Day 1 spike run, passed
+- Environment: MongoDB 8.3.11 (Atlas local image, build 2026-09-28); Docker Desktop 4.94.0 on WSL 2; mongosh 2.13.0.
+- mongosh (`spike/spike.js`): both indexes queryable on the 2nd poll. For "refund days", `d1` is first in `$vectorSearch` (0.999), `$search` (0.674), `$rankFusion` (0.0328) and `$scoreFusion` sigmoid (0.697). `$search` returned only 2 of 3 docs (d3 has no lexical match), the fusions returned all 3.
+- Java (`FusionSpike`): same two fusion stages, same ranking and scores, so the Java driver path works with `Document.parse`. `$rankFusion` took ~38 ms and `$scoreFusion` ~14 ms on 3 docs (not a benchmark).
+- Observations for the walkthrough: RRF score is `1/(60+rank)` summed over pipelines, so d1 = 2/61; `scoreDetails` shows each pipeline's rank and raw score; `$scoreFusion` default combination is `average` and a doc missing from a pipeline gets 0 for it (d3 text = 0).
+- Decision: native fusion stages work, so MongoDB with `$rankFusion`/`$scoreFusion`, no Java RRF fallback needed (kept in the plan as a safety net).
+- Still open: check that the cloud Atlas tier for the demo URL runs the same MongoDB version.
+
+### 2026-10-10: Day 1 spike files written
 - `docker-compose.yml` (mongodb-atlas-local:latest), `spike/spike.js` (mongosh: recreate data, create both indexes, poll until queryable, run `$vectorSearch`, `$search`, `$rankFusion`, `$scoreFusion`), `src/test/java/com/demo/agentfw/spike/FusionSpike.java` (the two fusion stages from Java, runbook step 5).
 - Verified only that the Java compiles and the JS parses. Nothing was executed against MongoDB; the spike is run by hand.
 - FusionSpike is not picked up by `./mvnw verify` (has `main`, no JUnit, name outside Surefire patterns).
