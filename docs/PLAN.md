@@ -84,12 +84,12 @@ Do not say MongoDB was chosen because the company uses it; that is an inference 
 
 ## Tech stack
 
-The stack is locked to Java 21, Spring Boot 3 and Google ADK for Java, with MongoDB Atlas as the only data store.
+The stack is locked to Java 21, Spring Boot 4.x and Google ADK for Java, with MongoDB Atlas as the only data store.
 
 | Layer | Choice | Why |
 | --- | --- | --- |
-| Agent framework | Google ADK for Java 1.x (pin the latest release; 1.6.0 was out in July 2026) | Asked for explicitly; MCP support built in |
-| App | Spring Boot 3, Java 21, Maven | Evaluator prefers Java for enterprise apps |
+| Agent framework | Google ADK for Java 1.x, pinned to 1.11.0 (latest on Maven Central, Oct 2026) | Asked for explicitly; MCP support built in |
+| App | Spring Boot 4.1.1, Java 21, Maven | Evaluator prefers Java for enterprise apps; Boot 3.5 lost OSS support on June 30, 2026 and ADK Java moved to Boot 4 |
 | LLM + embeddings | Gemini through ADK and the Google GenAI Java SDK | Native to ADK |
 | Vector + lexical search | MongoDB Atlas Vector Search + Atlas Search (BM25), local via Atlas CLI | Round 1 questions mapped to MongoDB features |
 | Hybrid fusion | `$rankFusion` and `$scoreFusion`, switchable; Java RRF as fallback | Round 1 asked about score fusion |
@@ -127,7 +127,11 @@ agent-framework/
 └── corpus/            # the 10 to 20 PDFs
 ```
 
-Versions below are starting points. Pin each to its latest release on day 1, and check Spring Boot against what ADK pulls in with `mvn dependency:tree`.
+Versions below are the ones pinned and verified on Oct 10, 2026 (`./mvnw dependency:tree` and `./mvnw verify` pass). Three things from the dependency tree to remember:
+
+- **Jackson 2 and 3 coexist.** Boot 4 uses Jackson 3 (`tools.jackson`); ADK's Google libraries use Jackson 2 (`com.fasterxml.jackson`, 2.21.x via Boot's BOM). The packages differ, so there is no class clash. ADK's MCP SDK (`io.modelcontextprotocol.sdk:mcp` 2.0.0) uses Jackson 3 through `mcp-json-jackson3`.
+- **Tika 4 changed packaging.** `tika-parsers-standard-package` is a pom-only aggregator since 4.0, so it needs `<type>pom</type>`; its parser modules come in transitively.
+- **Do not add Spring AI or `google-adk-spring-ai`.** Known MCP SDK version conflicts.
 
 ```xml
 <project xmlns="http://maven.apache.org/POM/4.0.0">
@@ -136,7 +140,7 @@ Versions below are starting points. Pin each to its latest release on day 1, and
   <parent>
     <groupId>org.springframework.boot</groupId>
     <artifactId>spring-boot-starter-parent</artifactId>
-    <version>3.5.0</version> <!-- literal: Maven can't use a property here; verify against ADK -->
+    <version>4.1.1</version> <!-- literal: Maven can't use a property here; latest GA 4.x -->
   </parent>
 
   <groupId>com.demo</groupId>
@@ -146,10 +150,10 @@ Versions below are starting points. Pin each to its latest release on day 1, and
   <properties>
     <java.version>21</java.version>
     <!-- Spring Boot version lives on the parent above -->
-    <adk.version>1.6.0</adk.version>                 <!-- pin latest 1.x -->
-    <pdfbox.version>3.0.5</pdfbox.version>
-    <tika.version>3.2.0</tika.version>
-    <djl.version>0.33.0</djl.version>
+    <adk.version>1.11.0</adk.version>                <!-- pin latest 1.x -->
+    <pdfbox.version>3.0.8</pdfbox.version>
+    <tika.version>4.1.0</tika.version>
+    <djl.version>0.38.0</djl.version>
   </properties>
 
   <dependencies>
@@ -163,7 +167,7 @@ Versions below are starting points. Pin each to its latest release on day 1, and
     <!-- Web, SSE, validation, health -->
     <dependency>
       <groupId>org.springframework.boot</groupId>
-      <artifactId>spring-boot-starter-web</artifactId>
+      <artifactId>spring-boot-starter-webmvc</artifactId>
     </dependency>
     <dependency>
       <groupId>org.springframework.boot</groupId>
@@ -190,6 +194,7 @@ Versions below are starting points. Pin each to its latest release on day 1, and
       <groupId>org.apache.tika</groupId>
       <artifactId>tika-parsers-standard-package</artifactId>
       <version>${tika.version}</version>
+      <type>pom</type> <!-- pom-only aggregator since Tika 4; has no jar -->
     </dependency>
 
     <!-- Cross-encoder re-ranker -->
@@ -209,9 +214,25 @@ Versions below are starting points. Pin each to its latest release on day 1, and
       <version>${djl.version}</version>
     </dependency>
 
+    <!-- Boot 4 has one test starter per main starter -->
     <dependency>
       <groupId>org.springframework.boot</groupId>
-      <artifactId>spring-boot-starter-test</artifactId>
+      <artifactId>spring-boot-starter-webmvc-test</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-validation-test</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-actuator-test</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-data-mongodb-test</artifactId>
       <scope>test</scope>
     </dependency>
   </dependencies>

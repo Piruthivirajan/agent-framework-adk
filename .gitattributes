@@ -1,2 +1,4 @@
+# Keep LF in the working tree on every OS (overrides core.autocrlf), except Windows scripts.
+* text=auto eol=lf
 /mvnw text eol=lf
 *.cmd text eol=crlf
