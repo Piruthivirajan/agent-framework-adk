@@ -1,0 +1,6 @@
+# Local MongoDB Atlas: mongod + mongot (search process) in one container. Development only.
+services:
+  mongodb:
+    image: mongodb/mongodb-atlas-local:latest   # pin the tag once the Day 1 spike passes
+    ports:
+      - "27017:27017"
