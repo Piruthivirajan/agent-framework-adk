@@ -38,8 +38,8 @@ Source of truth for scope: [PLAN.md](PLAN.md). Update this file after every task
 
 Decisions: reranker `ms-marco-MiniLM-L6-v2` fp32 as baseline, int8 chosen only if its top-5 agrees with fp32 on the same 20 pairs; rerank depth is a config value and 12 is measured against 20 (choose 12 if the expected page stays inside the fused top 12); truncation at 512 accepted and counted in the trace; corpus is gitignored and fetched by `scripts/fetch-corpus.sh` with a sha256 per file; calibration questions are drafted, then reviewed by the user before any calibration run.
 
-- [ ] 0. Corpus fetch script, compose robustness, ingest the real corpus
-- [ ] 1. Reranker: `ModelFiles` (download + sha256), `CrossEncoderReranker`, fp32 vs int8 comparison
+- [x] 0. Corpus fetch script, compose robustness, ingest the real corpus
+- [x] 1. Reranker: `ModelFiles` (download + sha256), `CrossEncoderReranker`, fp32 vs int8 comparison
 - [ ] 2. Retrieval core: `RANK` / `SCORE` / `JAVA_RRF`, config, Mongo integration test
 - [ ] 3. `RetrievalTrace` and `RetrievalService` with the grounding gate
 - [ ] 4. Calibration question set (drafted, **waiting for the user's review**), then calibration run, `docs/CALIBRATION.md`
@@ -56,6 +56,15 @@ Decisions: reranker `ms-marco-MiniLM-L6-v2` fp32 as baseline, int8 chosen only i
 ## Log
 
 <!-- Newest first. One entry per task: date, what was built, what was verified. -->
+
+### 2026-10-10: Day 3 steps 0 and 1, corpus, compose, reranker
+- **Corpus:** gitignored; `scripts/fetch-corpus.sh` downloads the 7 PDFs from official AWS URLs and verifies a sha256 each (`scripts/corpus-manifest.tsv`; `--check` only reports). 6 of 7 match the current docs.aws.amazon.com files byte for byte. `microservices-on-aws.pdf` is the **ARCHIVED 2021 edition** from d1.awsstatic.com (title "ARCHIVED: Implementing Microservices on AWS"); the current docs edition is a different file, so the manifest pins the archived one.
+- **Compose:** stable `hostname: agentfw-mongo` plus named volumes for `/data/db`, `/data/configdb` and `/data/mongot` (the last is not declared by the image but holds the search indexes). Tested: `up -d --force-recreate` keeps documents, the replica set and a READY search index. `down -v` still wipes everything on purpose.
+- **Real ingestion:** 7 documents, 2,050 chunks (1:1 with pages roughly), 768-dim `gemini-embedding-2`, 0 failures, about 4 minutes, both search indexes READY, 24.7 MB of data.
+- **Reranker:** `ModelFiles` pins the HF commit and a sha256 per file (fp32 91.0 MB, int8 23.2 MB, tokenizer 0.7 MB), downloads atomically and discards any file whose hash differs. `CrossEncoderReranker` scores pairs one at a time through DJL + ONNX Runtime and counts pairs truncated at 512 tokens. Default tests use `FakeReranker` and never load the model or download anything.
+- **fp32 vs int8 (12 real questions x their top-20 vector candidates):** top-1 equal 11/12, top-5 set equal 7/12 (mean overlap 4.58/5), median 1.71 s (fp32) vs 1.65 s (int8) per 20 pairs. Rule was "int8 only if top-5 agrees", so **fp32 is kept**; int8 also gave almost no speed-up on this CPU.
+- **Threads (20 pairs, fp32):** ONNX Runtime default 1.59 s, 1 thread 3.44 s, 4 threads 1.82 s, 6 threads 1.62 s, 12 threads 2.51 s. So per-query rerank is about 85 ms per pair on 6 cores and about 170 ms per pair on one core: relevant for Day 7 hosting (a 1 to 2 vCPU host will be 2x or more slower).
+- Not investigated: why int8 gives almost no gain (candidates: DJL per-call overhead, no VNNI path on this CPU).
 
 ### 2026-10-10: Day 3 research (no code yet)
 - Pinned compose tag verified: `mongodb-atlas-local:8.3.11-20260928T091948Z` has the same image ID as `latest` and `db.version()` returns 8.3.11, healthy.

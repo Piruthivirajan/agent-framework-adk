@@ -18,6 +18,11 @@ agentfw:
     batch-size: 32
     max-retries: 5
     api-key: ${GOOGLE_API_KEY:}
+  rerank:
+    provider: djl                                  # "fake" is used by tests; the fake lives in src/test
+    model-dir: models/ms-marco-MiniLM-L-6-v2       # gitignored; downloaded and sha256-verified on first start
+    model-file: model.onnx                         # fp32; or model_quint8_avx2.onnx (int8)
+    max-length: 512
   ingestion:
     corpus-dir: corpus
     on-startup: false
