@@ -31,7 +31,7 @@ Source of truth for scope: [PLAN.md](PLAN.md). Update this file after every task
 - [x] 2. `PdfLoader` and tests
 - [x] 3. `Chunker` and tests
 - [x] 4. `ChunkStore`, `MongoChunkStore`, index initializer, Mongo integration test
-- [ ] 5. `IngestionJob`, startup trigger, tests
+- [x] 5. `IngestionJob`, startup trigger, tests
 - [ ] 6. Manual smoke run on the placeholder PDFs (`corpus-sample/`)
 
 ## Watch list
@@ -41,6 +41,15 @@ Source of truth for scope: [PLAN.md](PLAN.md). Update this file after every task
 ## Log
 
 <!-- Newest first. One entry per task: date, what was built, what was verified. -->
+
+### 2026-10-10: Day 2 step 5, ingestion job
+- `IngestionJob.run()`: list `*.pdf` (case-insensitive, sorted), fail fast on two files with the same `docId`, then per file: hash it; skip if the store has exactly that hash and the current embedding model; otherwise parse, chunk, embed everything, and only then replace the stored chunks in one transaction. Per-file errors are collected in the result and do not stop the other files; the old chunks of a failed file stay.
+- Pruning: documents that are no longer in the folder are deleted from the store, except when the folder contains no PDFs at all (then it is skipped with a warning; more likely a wrong path than an intended wipe). A missing folder is an error, not an empty run.
+- PDFs without a text layer (scans) are reported as `empty`, nothing is stored and stale chunks are removed.
+- `IngestionStartupRunner` (only when `agentfw.ingestion.on-startup=true`) creates the indexes, then runs the job; that is how a deployment seeds its corpus. Default is off, so tests and normal runs never touch MongoDB or the API at boot (`IngestionWiringTest`).
+- `tenantId` comes from `agentfw.tenant-id` via `AgentFwProperties`, used for every read, write and delete.
+- Tests (in-memory `ChunkStore`, fake embeddings, PDFs built on the fly): first run fields and page numbers, re-run makes 0 embedding calls and 0 store writes, changed file re-embeds only itself, model change re-embeds everything, prune, empty-folder guard, embedding failure keeps old chunks and continues, corrupt PDF, scan, duplicate ids, missing folder, non-PDF files.
+- Verified: BUILD SUCCESS, 58 tests.
 
 ### 2026-10-10: Day 2 step 4, MongoDB storage and search indexes
 - `ChunkStore` is the port the ingestion job will depend on; `MongoChunkStore` implements it with the plain driver. `replaceDocument` runs delete + insert in one transaction (works because Atlas local is a replica set), so a reader sees the old chunks or the new ones, never a mix; a failed insert rolls back (tested with a deliberate unique-index violation).
