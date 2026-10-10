@@ -22,7 +22,7 @@ Source of truth for scope: [PLAN.md](PLAN.md). Update this file after every task
 - [x] Both search indexes show `queryable: true`
 - [x] `$vectorSearch` alone and `$search` alone each return the refund chunk first
 - [x] `$rankFusion` and `$scoreFusion` run from Java and print scores (no Java RRF fallback needed)
-- [ ] The cloud Atlas tier planned for the demo URL is checked for the same MongoDB version
+- [ ] The cloud Atlas tier planned for the demo URL is checked for the same MongoDB version. Docs say `$rankFusion` needs 8.0+ and `$scoreFusion` needs **8.3+**; Flex runs "at least 8.0" and is upgraded by Atlas only after several patches of a new version, so Flex/M0 may lack `$scoreFusion`. Verify by running `spike/spike.js` against the cloud cluster.
 - [x] Pin the `mongodb-atlas-local` image tag in docker-compose.yml (`8.3.11-20260928T091948Z`)
 
 ## Watch list
