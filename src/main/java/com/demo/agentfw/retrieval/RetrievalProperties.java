@@ -54,6 +54,12 @@ public record RetrievalProperties(
                 vectorWeight, textWeight, normalization, rrfK, minRerankScore);
     }
 
+    /** Same settings with another threshold; null scores everything without taking a decision. */
+    public RetrievalProperties withMinRerankScore(Double threshold) {
+        return new RetrievalProperties(fusion, numCandidates, perPipelineLimit, fusedLimit, rerankDepth, finalTopN,
+                vectorWeight, textWeight, normalization, rrfK, threshold);
+    }
+
     public RetrievalProperties withFusion(FusionStrategy strategy) {
         return new RetrievalProperties(strategy, numCandidates, perPipelineLimit, fusedLimit, rerankDepth, finalTopN,
                 vectorWeight, textWeight, normalization, rrfK, minRerankScore);

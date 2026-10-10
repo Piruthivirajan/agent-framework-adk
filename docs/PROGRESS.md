@@ -42,7 +42,7 @@ Decisions: reranker `ms-marco-MiniLM-L6-v2` fp32 as baseline, int8 chosen only i
 - [x] 1. Reranker: `ModelFiles` (download + sha256), `CrossEncoderReranker`, fp32 vs int8 comparison
 - [x] 2. Retrieval core: `RANK` / `SCORE` / `JAVA_RRF`, config, Mongo integration test
 - [x] 3. `RetrievalTrace` and `RetrievalService` with the grounding gate
-- [ ] 4. Calibration question set (drafted, **waiting for the user's review**), then calibration run, `docs/CALIBRATION.md`
+- [ ] 4. Calibration: question set drafted and harness built (**calibration NOT run; waiting for the user's review of `src/main/resources/eval/calibration-questions.json`**), then run it and write `docs/CALIBRATION.md`
 - [ ] 5. Smoke at retrieval level
 
 ## Day 7 notes
@@ -56,6 +56,11 @@ Decisions: reranker `ms-marco-MiniLM-L6-v2` fp32 as baseline, int8 chosen only i
 ## Log
 
 <!-- Newest first. One entry per task: date, what was built, what was verified. -->
+
+### 2026-10-10: Day 3 step 4 (part 1), calibration questions and harness
+- `src/main/resources/eval/calibration-questions.json`: 36 questions. 24 in-corpus (3 to 4 per document, across all 7), 6 out-of-corpus far (sports, cooking, geography), 6 out-of-corpus near-domain (Azure, GKE, Helm, PostgreSQL tuning, Linux sysctl, Google Cloud Architecture Framework). Every in-corpus question carries a verbatim evidence phrase; its `expected` pages are every page in the corpus where that phrase appears (the framework and the pillars repeat passages), table-of-contents pages excluded. Every out-of-corpus question lists terms that were checked absent from the corpus text. Every 4th question per type is held out (8 questions) and not used to choose the threshold.
+- Harness (not yet run on the corpus): `CalibrationRunner` (only with `agentfw.calibration.run=true`) retrieves each question once with all 20 fused candidates scored and no threshold, derives the depth-12 numbers from the same scores, and `CalibrationReport` renders `docs/CALIBRATION.md`: every score, recall at both depths, the depth decision, the threshold picked on the calibration split with its candidate table, the held-out check, and out-of-corpus scores by type. `ThresholdSelector` picks the midpoint with the best balanced accuracy and the widest empty gap.
+- Verified: BUILD SUCCESS, 106 tests.
 
 ### 2026-10-10: Day 3 step 3, trace and grounding gate
 - `RetrievalService.retrieve(query)` runs: embed, search and fuse (top 20), rerank the first `rerankDepth`, keep `finalTopN`, gate. `retrieve(query, settings)` takes per-call settings (fusion, depth), which the calibration and the Day 7 eval use.
