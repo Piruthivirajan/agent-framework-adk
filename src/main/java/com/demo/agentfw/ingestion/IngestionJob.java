@@ -57,7 +57,7 @@ public class IngestionJob {
     IngestionResult run(Path corpusDir) {
         if (!Files.isDirectory(corpusDir)) {
             throw new IllegalStateException("Corpus directory not found: " + corpusDir.toAbsolutePath()
-                    + " (agentfw.ingestion.corpus-dir)");
+                    + " (agentfw.ingestion.corpus-dir). The corpus is not in git: run scripts/fetch-corpus.sh");
         }
         List<Path> files = listPdfs(corpusDir);
         Set<String> docIdsOnDisk = docIds(files);

@@ -34,6 +34,21 @@ Source of truth for scope: [PLAN.md](PLAN.md). Update this file after every task
 - [x] 5. `IngestionJob`, startup trigger, tests
 - [x] 6. Manual smoke run on the placeholder PDFs (`corpus-sample/`)
 
+## Day 3: retrieval (approved plan, each step built, tested and committed)
+
+Decisions: reranker `ms-marco-MiniLM-L6-v2` fp32 as baseline, int8 chosen only if its top-5 agrees with fp32 on the same 20 pairs; rerank depth is a config value and 12 is measured against 20 (choose 12 if the expected page stays inside the fused top 12); truncation at 512 accepted and counted in the trace; corpus is gitignored and fetched by `scripts/fetch-corpus.sh` with a sha256 per file; calibration questions are drafted, then reviewed by the user before any calibration run.
+
+- [ ] 0. Corpus fetch script, compose robustness, ingest the real corpus
+- [ ] 1. Reranker: `ModelFiles` (download + sha256), `CrossEncoderReranker`, fp32 vs int8 comparison
+- [ ] 2. Retrieval core: `RANK` / `SCORE` / `JAVA_RRF`, config, Mongo integration test
+- [ ] 3. `RetrievalTrace` and `RetrievalService` with the grounding gate
+- [ ] 4. Calibration question set (drafted, **waiting for the user's review**), then calibration run, `docs/CALIBRATION.md`
+- [ ] 5. Smoke at retrieval level
+
+## Day 7 notes
+
+- **Hosting decision needs a measurement:** rerank latency on a small cloud CPU will be several times the laptop number (about 1.8 s for 20 chunks, single predictor, on an i7-10850H 6C/12T). Measure rerank latency on the target host before choosing the hosting tier; if too slow, options are the int8 model, a smaller rerank depth, or a hosted reranker behind the same `Reranker` interface.
+
 ## Watch list
 
 - The skeleton code in PLAN.md (`StreamableHttpServerParameters`, `AgentTool`, `FunctionTool.create`, `McpToolset`) was written against an older ADK. Before using any of them (Day 4 and Day 6), check the class and method names against the ADK 1.11.0 javadoc or sources.

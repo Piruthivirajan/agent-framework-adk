@@ -34,3 +34,7 @@ build/
 
 ### Secrets ###
 .env
+
+### Corpus and models (downloaded by scripts, never committed) ###
+/corpus/
+/models/

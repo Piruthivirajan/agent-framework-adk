@@ -1,0 +1,10 @@
+# sha256<TAB>file name<TAB>official URL. The hash pins the exact edition used for calibration and evaluation.
+# microservices-on-aws.pdf is the ARCHIVED 2021 edition (title 'ARCHIVED: Implementing Microservices on AWS');
+# the current docs.aws.amazon.com edition is a different file (2,277,404 bytes) and would not match.
+61955ef17d54293106673ee0efeb3bd371a10f40b2ab63e3267df7b5a9749911	microservices-on-aws.pdf	https://d1.awsstatic.com/whitepapers/microservices-on-aws.pdf
+76be2eddc9a8bae62a6e87a815214ee22fd2246861bd42101541f17b60892521	wellarchitected-framework.pdf	https://docs.aws.amazon.com/pdfs/wellarchitected/latest/framework/wellarchitected-framework.pdf
+2378b6c843d750b3d3cbd3b6ed387c54c15691c49a213a7160795a29a5dc71c5	wellarchitected-operational-excellence-pillar.pdf	https://docs.aws.amazon.com/pdfs/wellarchitected/latest/operational-excellence-pillar/wellarchitected-operational-excellence-pillar.pdf
+a723f3fb9c153a7cbcfe4360478d0f6e7aa9797e1c69f7d19d64d832f2934677	wellarchitected-performance-efficiency-pillar.pdf	https://docs.aws.amazon.com/pdfs/wellarchitected/latest/performance-efficiency-pillar/wellarchitected-performance-efficiency-pillar.pdf
+df62f21fb00f2c0ec84c1c1525dd0d5bcfbc39a991ea04eb89b195eae0175c20	wellarchitected-reliability-pillar.pdf	https://docs.aws.amazon.com/pdfs/wellarchitected/latest/reliability-pillar/wellarchitected-reliability-pillar.pdf
+ebd795eb2a25a3c54772fa5fdcb272bd40b628c50e2ace498e65ca6c5f3a2fa3	wellarchitected-security-pillar.pdf	https://docs.aws.amazon.com/pdfs/wellarchitected/latest/security-pillar/wellarchitected-security-pillar.pdf
+f62c6712fc31c234c16e19c7ea404ab04195034183db078701e42116846102ac	wellarchitected-serverless-applications-lens.pdf	https://docs.aws.amazon.com/pdfs/wellarchitected/latest/serverless-applications-lens/wellarchitected-serverless-applications-lens.pdf
