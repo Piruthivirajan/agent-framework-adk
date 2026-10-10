@@ -25,6 +25,15 @@ Source of truth for scope: [PLAN.md](PLAN.md). Update this file after every task
 - [ ] The cloud Atlas tier planned for the demo URL is checked for the same MongoDB version. Docs say `$rankFusion` needs 8.0+ and `$scoreFusion` needs **8.3+**; Flex runs "at least 8.0" and is upgraded by Atlas only after several patches of a new version, so Flex/M0 may lack `$scoreFusion`. Verify by running `spike/spike.js` against the cloud cluster.
 - [x] Pin the `mongodb-atlas-local` image tag in docker-compose.yml (`8.3.11-20260928T091948Z`)
 
+## Day 2: ingestion (steps, each built, tested and committed)
+
+- [x] 1. Config, `EmbeddingService`, Gemini implementation, fake, tests
+- [ ] 2. `PdfLoader` and tests
+- [ ] 3. `Chunker` and tests
+- [ ] 4. `ChunkStore`, `MongoChunkStore`, index initializer, Mongo integration test
+- [ ] 5. `IngestionJob`, startup trigger, tests
+- [ ] 6. Manual smoke run on the placeholder PDFs (`corpus-sample/`)
+
 ## Watch list
 
 - The skeleton code in PLAN.md (`StreamableHttpServerParameters`, `AgentTool`, `FunctionTool.create`, `McpToolset`) was written against an older ADK. Before using any of them (Day 4 and Day 6), check the class and method names against the ADK 1.11.0 javadoc or sources.
@@ -32,6 +41,15 @@ Source of truth for scope: [PLAN.md](PLAN.md). Update this file after every task
 ## Log
 
 <!-- Newest first. One entry per task: date, what was built, what was verified. -->
+
+### 2026-10-10: Day 2 step 1, embeddings
+- Model `gemini-embedding-2` at 768 dimensions, one model only (the name stays configurable in `application.yml`). `gemini-embedding-001` is not in the code. Its listed shutdown date is May 14, 2028 (July 14, 2025 is its release date), so retirement was not the reason; one model is simply less to defend.
+- Facts measured against the live API with a throwaway probe (5 tiny calls, not part of the repo): `-2` returns unit-norm vectors at 768 and 1536; `-001` at 768 returned norm 0.59 (not normalized); a list of 3 strings returns 3 embeddings.
+- `EmbeddingService` has `embedDocuments(title, texts)` and `embedQuery(q)` so the model's prefix formats (`title: … | text: …`, `task: search result | query: …`) live in one class. `GeminiEmbeddingService` batches (32), retries 429/5xx/network with exponential backoff (max 5, cap 30 s), and rejects a wrong vector count or dimension.
+- Dimension 768 is one property that feeds both the API `outputDimensionality` and (step 4) the vector index `numDimensions`. Not measured: recall at 768 vs 1536 vs 3072; the Day 7 golden-set eval is where that gets compared.
+- Tests never reach the API: `FakeEmbeddingService` lives in `src/test` and is selected by `agentfw.embedding.provider=fake` in test `application.properties`; the Gemini bean does not exist then. `EmbeddingWiringTest` asserts that. The key is also blanked in test config.
+- `application.properties` replaced by `application.yml`; `.env` is loaded through `spring.config.import`; Mongo URI is `spring.mongodb.uri` (Boot 4 name) with `directConnection=true`.
+- Verified: `./mvnw verify` BUILD SUCCESS, 18 tests.
 
 ### 2026-10-10: Day 1 spike run, passed
 - Environment: MongoDB 8.3.11 (Atlas local image, build 2026-09-28); Docker Desktop 4.94.0 on WSL 2; mongosh 2.13.0.

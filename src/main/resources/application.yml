@@ -1,0 +1,26 @@
+spring:
+  application:
+    name: agent-framework
+  config:
+    # Loads GOOGLE_API_KEY (and other secrets) from the gitignored .env in the working directory.
+    import: optional:file:.env[.properties]
+  mongodb:
+    # directConnection: the Atlas local container advertises its container hostname, which the
+    # host cannot resolve, so the driver must not follow replica set discovery.
+    uri: mongodb://localhost:27017/agentfw?directConnection=true
+
+agentfw:
+  tenant-id: demo
+  embedding:
+    provider: gemini            # "fake" is used by tests; the fake lives in src/test
+    model: gemini-embedding-2
+    dimensions: 768             # drives both the API call and the vector index numDimensions
+    batch-size: 32
+    max-retries: 5
+    api-key: ${GOOGLE_API_KEY:}
+  ingestion:
+    corpus-dir: corpus
+    on-startup: false
+    chunk-target-tokens: 650
+    chunk-overlap-percent: 15
+    chunk-min-tail-tokens: 100
