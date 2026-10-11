@@ -75,6 +75,21 @@ Retrieval gate (done, Day 3): a low **floor** at -6.5 removes only clear junk; 3
 - [x] Paraphrased questions were 0 of 2 at retrieval: test whether the agent's query rewriting (up to 3 `searchDocuments` calls) recovers them.
 - [x] Definitional "what is X" questions score low with the MS MARCO cross-encoder even when the right page is retrieved (in-03, in-17); the floor is deliberately below them. Check that the verifier, not the floor, is what protects against false answers.
 
+## Day 5: file agent, API, UI (approved plan, each step built, tested and committed)
+
+Decisions (user): file agent shape decided by the step 0 spike; **two paths** to the file agent: an attachment goes to it by code (fast path, no coordinator call), and the coordinator also gets it as a tool taking the `fileId` of a file already uploaded in this session (follow-ups such as "shorter" or "what does that file say about X"); no `llmRoutable=false`. Summaries are labelled and not quote-verified (`grounded=false`). Pasted content goes through the same upload endpoint. Limits start at about 1M extracted characters (500k would reject the 300+ page framework PDF) and are set from the step 6 measurement. Verifier: retry once for malformed JSON only, numeric rule stays strict, and the RAG prompt states that every number in a claim must appear in its quote. SSE stage events for chat as well ("routing", "searching", "reranking", "verifying"). "Add to knowledge base" is separate from the chat attachment. Follow-up questions are rewritten into a standalone query from the chat history before they reach the RAG agent (its session is isolated).
+
+- [x] 0. ADK spike: file agent shape (LlmAgent + tool vs custom BaseAgent), a tool that calls the model, cost of the extra call
+- [ ] 1. Verifier: one retry for malformed JSON, RAG prompt line on numbers, measured on the same 48 questions
+- [ ] 2. Uploads: Tika parsing, `uploads` collection (TTL), limits, error messages
+- [ ] 3. `MapReduceSummarizer` (single pass, map-reduce, hierarchical reduce, failure behaviour)
+- [ ] 4. `FileAgentPlugin`, fast path by code, coordinator tool with session files, summaries labelled
+- [ ] 5. Follow-up rewriting from chat history (3 follow-up pairs in tests)
+- [ ] 6. API: `/api/chat`, `/api/files`, error handler; SSE stage events
+- [ ] 7. Knowledge base: `POST /api/kb/documents`, single-file ingestion with progress, no-text-layer rejection
+- [ ] 8. UI: chat, attach/paste, sources, trace panel, progress, KB upload; verified in the browser on A, B, C
+- [ ] 9. Scenario C measurement (small TXT, 20-page PDF, the 300+ page PDF), final limits from the numbers
+
 ## Watch list
 
 - The skeleton code in PLAN.md (`StreamableHttpServerParameters`, `AgentTool`, `FunctionTool.create`, `McpToolset`) was written against an older ADK. Before using any of them (Day 4 and Day 6), check the class and method names against the ADK 1.11.0 javadoc or sources.
@@ -82,6 +97,15 @@ Retrieval gate (done, Day 3): a low **floor** at -6.5 removes only clear junk; 3
 ## Log
 
 <!-- Newest first. One entry per task: date, what was built, what was verified. -->
+
+### 2026-10-11: Day 5 step 0, file agent shape (spike, `src/test/.../spike/FileAgentSpike.java`)
+- **Decision: a custom `BaseAgent` that runs the summarizer in code** (variant B), not an `LlmAgent` with a `summarize_file` tool (variant A). Measured live, `gemini-3.8-flash`, thinking budget 0, a 2,000-character text, 5 repeats:
+  - one plain model call (`BaseLlm.generateContent`) = **2.8 s**; variant B end to end = **2.8 s** (the agent adds nothing);
+  - variant A with a canned tool (so only the agent's own cost shows) = **4.1 s**: two extra model calls (choose the tool, relay its result). A real summary would be about 6.9 s, 2.5x B.
+  - Through the coordinator (`AgentTool`, skip summarization): B 4.2 s, A (canned) 5.5 s.
+- Verified API facts (jar 1.11.0): `BaseAgent(name, description, subAgents, beforeCallbacks, afterCallbacks)` with `protected runAsyncImpl(InvocationContext)` and `runLiveImpl` to implement; `Event.builder()...content(Content)`; `InvocationContext.userContent()` and `session().state()`; `BaseLlm.generateContent(LlmRequest, boolean)`; `LlmRequest.builder().model().contents().config()`; system instruction goes in `GenerateContentConfig.systemInstruction(Content)`. A state delta passed to `runAsync` is visible in the nested agent (`sessionFiles` seen), and the coordinator called `file_agent` as an `AgentTool`.
+- **Consequence:** the model no longer extracts the arguments, so code resolves the file: a `fileId=` in the request, else the session's most recent upload. `ChatService` will list the session's files in the message it gives the coordinator, and pass them in the state delta. What A would have bought (the model choosing among several files) is covered by that rule for the handful of files a demo session has.
+- Not part of the build (`main`, no JUnit); run with the test classpath.
 
 ### 2026-10-11: Day 4 latency step (levers, same 48 questions, adversarial set)
 - **Result, same-hour before vs after** (`lat-b3-repeat` vs `lat-r3-final`): median **12.7 s to 9.1 s**, p90 **19.3 s to 13.4 s**, mean 13.4 to 9.8 s, searches per question 1.83 to 1.19. Per type, median: IN_CORPUS 11.4 to 9.1 s, OUT_FAR 13.5 to 7.6 s (1.0 search), OUT_NEAR 19.3 to 9.3 s, OUT_AWS 18.1 to 10.6 s. Quality is within run-to-run variation (the unchanged config scored 28 correct, then 26; the final run 28), 0 out-of-corpus answers throughout.
