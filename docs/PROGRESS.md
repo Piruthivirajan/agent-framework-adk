@@ -42,8 +42,8 @@ Decisions: reranker `ms-marco-MiniLM-L6-v2` fp32 as baseline, int8 chosen only i
 - [x] 1. Reranker: `ModelFiles` (download + sha256), `CrossEncoderReranker`, fp32 vs int8 comparison
 - [x] 2. Retrieval core: `RANK` / `SCORE` / `JAVA_RRF`, config, Mongo integration test
 - [x] 3. `RetrievalTrace` and `RetrievalService` with the grounding gate
-- [ ] 4. Calibration: question set (48), harness, baseline and stripping experiment done (`docs/CALIBRATION.md`); **the grounding threshold is not set yet, it needs a decision between false "not found" and unsupported answers**
-- [ ] 5. Smoke at retrieval level
+- [x] 4. Calibration: 48 questions, baseline, stripping experiment (rejected), retrieval floor -6.5 and high-confidence marker 3.3 set from the saved numbers, strict and widened recall reported (`docs/CALIBRATION.md`)
+- [x] 5. Smoke at retrieval level (the final calibration run: scenario A and B questions through the real retrieval path, floor applied)
 
 ## Day 7 notes
 
@@ -67,6 +67,16 @@ Retrieval gate (done, Day 3): a low **floor** at -6.5 removes only clear junk; 3
 ## Log
 
 <!-- Newest first. One entry per task: date, what was built, what was verified. -->
+
+### 2026-10-11: Day 3 finished, floor, high-confidence marker, widened pages, retrieval smoke
+- **Decision C (user):** retrieval is a low floor, the answering step decides. `min-rerank-score` = **-6.5**: the lowest in-corpus top-1 over all 32 questions is -6.38 (in-31), rounded down to the next half point, so it cuts 0 of 32 in-corpus questions. It rejects 9 of the 16 out-of-corpus questions (6 of 6 unrelated, 3 of 6 near-domain, 0 of 4 AWS limit/price questions); the other 7 pass on to the answering step. The floor is not the defence against OUT_AWS; the Day 4 citation-and-quote verifier is. `high-confidence-score` = **3.3** is recorded in the trace only (26 of 32 in-corpus reach it, none of the 16 out-of-corpus; closest 3.17); no behaviour depends on it. The reasoning is in `docs/CALIBRATION.md`.
+- **Trace:** `Config.highConfidenceScore` and `Grounding.highConfidence` added; the retrieval floor appears as `Grounding.threshold` and `margin`. Note for Day 4: `GroundingDecision.OK` now means "above the floor, handed on", not "grounded".
+- **Strict and widened expected pages:** the strict set is unchanged (fixed before any run); widened = adjacent pages (all in-corpus questions, one rule) plus quoted alternate-evidence sentences for in-10, in-11, in-31 and in-32 (added after reading returned pages, so optimistic by construction; each with its quote in `widenedNotes`). Final run, rerank depth 12: answer page in the final top 5 **26 strict / 31 widened of 32**; in the fused top 20: 29 / 31; paraphrases 0 / 2 strict, 2 / 2 widened. Only in-21 (Lambda cold starts) is missed under both.
+- **Reproducibility:** the final run (same pipeline as the baseline, index rebuilt by a re-ingest) matches the baseline on 47 of 48 questions; in-13 differs only in ranks 13 to 20 of the candidate pool.
+- **Harness:** `expectedWidened` with notes, strict and widened columns, floor table per type, `also-detail`, tolerant loading of older saved runs (tested).
+- **Config:** `rerank-depth: 12`, `min-rerank-score: -6.5`, `high-confidence-score: 3.3`.
+- Verified: BUILD SUCCESS, 119 tests.
+- **Housekeeping:** a mistyped scratch path created an empty folder tree `D:/c/Users/...` on the D: drive (two scratch files, since copied elsewhere); my attempt to delete it was refused by a path-protection check, so it is still there and can be deleted by hand.
 
 ### 2026-10-11: Day 3, baseline calibration and the header-stripping experiment
 - **Baseline** (10 documents, 2,353 chunks, 48 questions, headers kept): the answer page is in the final top 5 for 26 of 32 in-corpus questions, at rerank depth 20 and at 12 (no question loses it at 12), so `rerank-depth` is now 12. Answer page in the fused top 20: 29, top 12: 28. Paraphrased questions: 0 of 2. Held-out: 10 of 11 classified correctly at the chosen threshold.
