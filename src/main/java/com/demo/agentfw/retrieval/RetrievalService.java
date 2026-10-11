@@ -36,7 +36,7 @@ public class RetrievalService {
         this.reranker = reranker;
         this.defaults = defaults;
         if (defaults.minRerankScore() == null) {
-            log.warn("agentfw.retrieval.min-rerank-score is not set: the grounding gate is NOT calibrated and "
+            log.warn("agentfw.retrieval.min-rerank-score is not set: the retrieval floor is NOT calibrated and "
                     + "will report NOT_CALIBRATED. Run the calibration (docs/CALIBRATION.md) and set it.");
         }
     }
@@ -91,20 +91,23 @@ public class RetrievalService {
 
         GroundingDecision decision = GroundingGate.decide(topScore, s.minRerankScore());
         Double margin = (topScore != null && s.minRerankScore() != null) ? topScore - s.minRerankScore() : null;
-        log.info("retrieval stage=grounding decision={} topScore={} threshold={} margin={}",
-                decision, topScore, s.minRerankScore(), margin);
+        boolean highConfidence = topScore != null && s.highConfidenceScore() != null
+                && topScore >= s.highConfidenceScore();
+        log.info("retrieval stage=grounding decision={} topScore={} floor={} margin={} highConfidence={}",
+                decision, topScore, s.minRerankScore(), margin, highConfidence);
 
         RetrievalTrace trace = new RetrievalTrace(
                 query,
                 new RetrievalTrace.Config(s.fusion().name(), s.numCandidates(), s.perPipelineLimit(), s.fusedLimit(),
                         s.rerankDepth(), s.finalTopN(), s.vectorWeight(), s.textWeight(), s.normalization(),
-                        s.minRerankScore(), embeddings.modelName(), embeddings.dimensions(), reranker.modelName()),
+                        s.minRerankScore(), s.highConfidenceScore(), embeddings.modelName(), embeddings.dimensions(),
+                        reranker.modelName()),
                 embedMs,
                 new RetrievalTrace.Search(found.strategy().name(), found.vectorHits(), found.textHits(),
                         found.unionSize(), found.stageMillis(),
                         found.candidates().stream().map(RetrievalService::toTrace).toList()),
                 new RetrievalTrace.Rerank(reranker.modelName(), pool.size(), truncated, rerankMs, scored, top.size()),
-                new RetrievalTrace.Grounding(topScore, s.minRerankScore(), margin, decision),
+                new RetrievalTrace.Grounding(topScore, s.minRerankScore(), margin, decision, highConfidence),
                 millisSince(start));
 
         List<RetrievedChunk> context = decision == GroundingDecision.NO_RELEVANT_CONTEXT ? List.of() : top;

@@ -53,7 +53,7 @@ class CalibrationQuestionsTest {
     @Test
     void outcomeIsDerivedFromTheTraceForBothDepths() {
         CalibrationQuestion q = new CalibrationQuestion("in-x", "IN_CORPUS", "question", "calibration",
-                List.of(new CalibrationQuestion.Expected("wellarchitected-security-pillar.pdf", List.of(47))), null);
+                List.of(new CalibrationQuestion.Expected("wellarchitected-security-pillar.pdf", List.of(47))), null, null, null);
 
         // 14 scored passages; the answer page (file/page 47) was fused rank 14 and reranked first
         List<RetrievalTrace.FusedCandidate> fused = new java.util.ArrayList<>();
@@ -68,12 +68,12 @@ class CalibrationQuestionsTest {
         }
         scored.sort(java.util.Comparator.comparingInt(RetrievalTrace.ScoredPassage::rerankRank));
         RetrievalTrace trace = new RetrievalTrace("question",
-                new RetrievalTrace.Config("RANK", 400, 20, 20, 20, 5, 1, 1, "sigmoid", null, "e", 768, "r"),
+                new RetrievalTrace.Config("RANK", 400, 20, 20, 20, 5, 1, 1, "sigmoid", null, null, "e", 768, "r"),
                 1, new RetrievalTrace.Search("RANK", 20, 5, 25, Map.of(), fused),
                 new RetrievalTrace.Rerank("r", 14, 3, 50, scored, 5),
-                new RetrievalTrace.Grounding(9.0, null, null, com.demo.agentfw.retrieval.GroundingDecision.NOT_CALIBRATED),
+                new RetrievalTrace.Grounding(9.0, null, null, com.demo.agentfw.retrieval.GroundingDecision.NOT_CALIBRATED, false),
                 60);
-        RetrievalProperties s = new RetrievalProperties(FusionStrategy.RANK, 400, 20, 20, 20, 5, 1, 1, "sigmoid", 60, null);
+        RetrievalProperties s = new RetrievalProperties(FusionStrategy.RANK, 400, 20, 20, 20, 5, 1, 1, "sigmoid", 60, null, null);
 
         QuestionOutcome o = CalibrationRunner.outcome(q, trace, s);
 
@@ -84,5 +84,54 @@ class CalibrationQuestionsTest {
         assertThat(o.top1Depth12()).isLessThan(9.0);
         assertThat(o.truncatedPairs()).isEqualTo(3);
         assertThat(o.top1Where()).isEqualTo("wellarchitected-security-pillar".replace("wellarchitected-", "wa-") + " p47");
+    }
+
+    @Test
+    void widenedPagesAreDocumentedAndNeverRewriteTheStrictSet() {
+        for (CalibrationQuestion q : CalibrationQuestions.load()) {
+            if (!q.inCorpus()) {
+                assertThat(q.expectedWidened() == null || q.expectedWidened().isEmpty()).as(q.id()).isTrue();
+                continue;
+            }
+            assertThat(q.widenedNotes()).as(q.id() + " widened notes").isNotEmpty();
+            for (CalibrationQuestion.Expected w : q.expectedWidened()) {
+                for (int page : w.pages()) {
+                    assertThat(q.isExpected(w.file(), page)).as(q.id() + " widened page is also strict").isFalse();
+                    assertThat(q.isAcceptable(w.file(), page)).isTrue();
+                }
+            }
+            for (CalibrationQuestion.Expected e : q.expected()) {
+                for (int page : e.pages()) {
+                    assertThat(q.isAcceptable(e.file(), page)).as(q.id() + " strict page is acceptable").isTrue();
+                }
+            }
+        }
+    }
+
+    @Test
+    void onlyFourQuestionsUseAlternateEvidenceAndInTwentyOneIsNotWidenedBeyondAdjacency() {
+        List<CalibrationQuestion> all = CalibrationQuestions.load();
+        List<String> withAlternate = all.stream()
+                .filter(q -> q.widenedNotes() != null && q.widenedNotes().stream().anyMatch(n -> n.startsWith("alternate evidence")))
+                .map(CalibrationQuestion::id).toList();
+
+        assertThat(withAlternate).containsExactlyInAnyOrder("in-10", "in-11", "in-31", "in-32");
+    }
+
+    @Test
+    void aRunSavedBeforeTheWidenedFieldsExistedStillLoads() {
+        String old = "{\"label\":\"baseline\",\"note\":\"n\",\"context\":{\"generatedAt\":\"t\",\"embeddingModel\":\"e\","
+                + "\"rerankModel\":\"r\",\"fusion\":\"RANK\",\"fusedLimit\":20,\"finalTopN\":5},"
+                + "\"outcomes\":[{\"id\":\"in-01\",\"type\":\"IN_CORPUS\",\"split\":\"calibration\",\"question\":\"q\","
+                + "\"top1Depth20\":1.5,\"top1Where\":\"doc p1\",\"top1Depth12\":1.5,\"expectedFusedRank\":2,"
+                + "\"inTop5Depth20\":true,\"inTop5Depth12\":true,\"truncatedPairs\":0,\"rerankMillis\":10,"
+                + "\"totalMillis\":20,\"paraphrase\":false}]}";
+
+        CalibrationRun run = CalibrationRunner.readRun(old);
+
+        assertThat(run.outcomes()).hasSize(1);
+        assertThat(run.outcomes().get(0).inTop5Depth12Widened()).isFalse();
+        assertThat(run.outcomes().get(0).expectedFusedRankWidened()).isNull();
+        assertThat(run.context().minRerankScore()).isNull();
     }
 }

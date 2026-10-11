@@ -19,7 +19,7 @@ class RetrievalServiceTest {
 
     private static RetrievalProperties settings(int fused, int depth, int topN, Double threshold) {
         return new RetrievalProperties(FusionStrategy.RANK, 400, 20, fused, depth, topN, 1.0, 1.0, "sigmoid", 60,
-                threshold);
+                threshold, null);
     }
 
     /** n candidates, fused rank 1..n, page = rank, text mentions its rank. */

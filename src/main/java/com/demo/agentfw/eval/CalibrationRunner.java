@@ -11,6 +11,7 @@ import org.springframework.boot.ApplicationArguments;
 import org.springframework.boot.ApplicationRunner;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
+import tools.jackson.databind.DeserializationFeature;
 import tools.jackson.databind.SerializationFeature;
 import tools.jackson.databind.json.JsonMapper;
 
@@ -51,6 +52,7 @@ public class CalibrationRunner implements ApplicationRunner {
     private final String dir;
     private final String output;
     private final boolean renderOnly;
+    private final String alsoDetail;
 
     public CalibrationRunner(RetrievalService retrieval, RetrievalProperties defaults,
                              @Value("${agentfw.calibration.label:run}") String label,
@@ -58,7 +60,8 @@ public class CalibrationRunner implements ApplicationRunner {
                              @Value("${agentfw.calibration.compare-with:}") String compareWith,
                              @Value("${agentfw.calibration.dir:docs/calibration}") String dir,
                              @Value("${agentfw.calibration.output:docs/CALIBRATION.md}") String output,
-                             @Value("${agentfw.calibration.render-only:false}") boolean renderOnly) {
+                             @Value("${agentfw.calibration.render-only:false}") boolean renderOnly,
+                             @Value("${agentfw.calibration.also-detail:}") String alsoDetail) {
         this.retrieval = retrieval;
         this.defaults = defaults;
         this.label = label;
@@ -67,11 +70,16 @@ public class CalibrationRunner implements ApplicationRunner {
         this.dir = dir;
         this.output = output;
         this.renderOnly = renderOnly;
+        this.alsoDetail = alsoDetail;
     }
 
     @Override
     public void run(ApplicationArguments args) throws IOException {
-        JsonMapper mapper = JsonMapper.builder().enable(SerializationFeature.INDENT_OUTPUT).build();
+        // runs saved before a field existed (for example the widened flags) must still load: missing = default
+        JsonMapper mapper = JsonMapper.builder()
+                .enable(SerializationFeature.INDENT_OUTPUT)
+                .disable(DeserializationFeature.FAIL_ON_NULL_FOR_PRIMITIVES)
+                .build();
         Path saved = Path.of(dir, label + ".json");
         RetrievalProperties settings = defaults.withRerankDepth(defaults.fusedLimit()).withMinRerankScore(null);
 
@@ -80,7 +88,7 @@ public class CalibrationRunner implements ApplicationRunner {
         CalibrationReport.Context context;
         if (renderOnly) {
             // no retrieval and no API call: redraw the report from a saved run
-            current = mapper.readValue(Files.readString(saved, StandardCharsets.UTF_8), CalibrationRun.class);
+            current = readRun(Files.readString(saved, StandardCharsets.UTF_8));
             outcomes = current.outcomes();
             context = current.context();
             log.info("Re-rendering saved run '{}' from {}", label, saved.toAbsolutePath());
@@ -99,7 +107,8 @@ public class CalibrationRunner implements ApplicationRunner {
                 rerankModel = r.trace().config().rerankModel();
             }
             context = new CalibrationReport.Context(Instant.now().toString(), embeddingModel,
-                    rerankModel, settings.fusion().name(), settings.fusedLimit(), settings.finalTopN());
+                    rerankModel, settings.fusion().name(), settings.fusedLimit(), settings.finalTopN(),
+                    defaults.minRerankScore(), defaults.highConfidenceScore());
             current = new CalibrationRun(label, note, context, outcomes);
             Files.createDirectories(saved.getParent());
             Files.writeString(saved, mapper.writeValueAsString(current), StandardCharsets.UTF_8);
@@ -109,11 +118,17 @@ public class CalibrationRunner implements ApplicationRunner {
         String markdown;
         Path other = compareWith.isBlank() ? null : Path.of(dir, compareWith + ".json");
         if (other != null && Files.isRegularFile(other)) {
-            CalibrationRun baseline = mapper.readValue(Files.readString(other, StandardCharsets.UTF_8),
-                    CalibrationRun.class);
+            CalibrationRun baseline = readRun(Files.readString(other, StandardCharsets.UTF_8));
             Path findingsFile = Path.of(dir, "findings.md");
             String findings = Files.isRegularFile(findingsFile) ? Files.readString(findingsFile, StandardCharsets.UTF_8) : null;
-            markdown = CalibrationReport.renderComparison(baseline, current, findings);
+            List<CalibrationRun> extras = new ArrayList<>();
+            for (String extraLabel : alsoDetail.split(",")) {
+                Path extra = Path.of(dir, extraLabel.strip() + ".json");
+                if (!extraLabel.isBlank() && Files.isRegularFile(extra)) {
+                    extras.add(readRun(Files.readString(extra, StandardCharsets.UTF_8)));
+                }
+            }
+            markdown = CalibrationReport.renderComparison(baseline, current, findings, extras);
         } else {
             if (other != null) {
                 log.warn("Run '{}' to compare with was not found at {}; writing a single-run report", compareWith, other);
@@ -128,6 +143,14 @@ public class CalibrationRunner implements ApplicationRunner {
         log.info("Calibration report written to {}", target.toAbsolutePath());
     }
 
+    /** Reads a saved run; fields added after it was written (widened flags, top pages) take their defaults. */
+    static CalibrationRun readRun(String json) {
+        JsonMapper mapper = JsonMapper.builder()
+                .disable(DeserializationFeature.FAIL_ON_NULL_FOR_PRIMITIVES)
+                .build();
+        return mapper.readValue(json, CalibrationRun.class);
+    }
+
     static QuestionOutcome outcome(CalibrationQuestion q, RetrievalTrace trace, RetrievalProperties s) {
         List<RetrievalTrace.ScoredPassage> byScore = trace.rerank().scored();   // best first, depth 20
         RetrievalTrace.ScoredPassage best = byScore.get(0);
@@ -137,18 +160,30 @@ public class CalibrationRunner implements ApplicationRunner {
         double top12 = within12.isEmpty() ? best.rerankScore() : within12.get(0).rerankScore();
 
         Integer expectedRank = null;
+        Integer expectedRankWidened = null;
         boolean in5d20 = false;
         boolean in5d12 = false;
+        boolean in5d20w = false;
+        boolean in5d12w = false;
+        List<RetrievalTrace.ScoredPassage> top5of12 = within12.stream().limit(s.finalTopN()).toList();
         if (q.inCorpus()) {
             expectedRank = trace.search().fusedTop().stream()
                     .filter(c -> q.isExpected(c.file(), c.page()))
                     .map(RetrievalTrace.FusedCandidate::fusedRank).min(Integer::compare).orElse(null);
-            in5d20 = byScore.stream().limit(s.finalTopN()).anyMatch(p -> q.isExpected(p.file(), p.page()));
-            in5d12 = within12.stream().limit(s.finalTopN()).anyMatch(p -> q.isExpected(p.file(), p.page()));
+            expectedRankWidened = trace.search().fusedTop().stream()
+                    .filter(c -> q.isAcceptable(c.file(), c.page()))
+                    .map(RetrievalTrace.FusedCandidate::fusedRank).min(Integer::compare).orElse(null);
+            List<RetrievalTrace.ScoredPassage> top5of20 = byScore.stream().limit(s.finalTopN()).toList();
+            in5d20 = top5of20.stream().anyMatch(p -> q.isExpected(p.file(), p.page()));
+            in5d12 = top5of12.stream().anyMatch(p -> q.isExpected(p.file(), p.page()));
+            in5d20w = top5of20.stream().anyMatch(p -> q.isAcceptable(p.file(), p.page()));
+            in5d12w = top5of12.stream().anyMatch(p -> q.isAcceptable(p.file(), p.page()));
         }
+        List<String> top5Pages = top5of12.stream().map(p -> shortName(p.file()) + " p" + p.page()).toList();
         return new QuestionOutcome(q.id(), q.type(), q.split(), q.question(), best.rerankScore(),
                 shortName(best.file()) + " p" + best.page(), top12, expectedRank, in5d20, in5d12,
-                trace.rerank().truncatedPairs(), trace.rerank().millis(), trace.totalMillis(), q.paraphrase());
+                trace.rerank().truncatedPairs(), trace.rerank().millis(), trace.totalMillis(), q.paraphrase(),
+                expectedRankWidened, in5d20w, in5d12w, top5Pages);
     }
 
     private static String shortName(String file) {

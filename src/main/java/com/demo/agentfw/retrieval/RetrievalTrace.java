@@ -23,7 +23,7 @@ public record RetrievalTrace(
     public record Config(
             String fusion, int numCandidates, int perPipelineLimit, int fusedLimit, int rerankDepth, int finalTopN,
             double vectorWeight, double textWeight, String normalization, Double minRerankScore,
-            String embeddingModel, int dimensions, String rerankModel) {
+            Double highConfidenceScore, String embeddingModel, int dimensions, String rerankModel) {
     }
 
     /** One fused candidate with the evidence of how it got there. */
@@ -58,8 +58,12 @@ public record RetrievalTrace(
             String model, int pairsScored, int truncatedPairs, long millis, List<ScoredPassage> scored, int kept) {
     }
 
-    /** {@code margin} is topScore - threshold; null when there is no score or no threshold. */
-    public record Grounding(Double topScore, Double threshold, Double margin, GroundingDecision decision) {
+    /**
+     * {@code margin} is topScore - floor; null when there is no score or no floor.
+     * {@code highConfidence} is informational only: the top score reached the high-confidence level.
+     */
+    public record Grounding(Double topScore, Double threshold, Double margin, GroundingDecision decision,
+                            boolean highConfidence) {
     }
 
     /** Latency per stage in pipeline order, for the panel's timeline. */

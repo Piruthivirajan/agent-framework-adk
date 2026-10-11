@@ -17,7 +17,10 @@ import org.springframework.boot.context.properties.bind.DefaultValue;
  * @param textWeight       weight of the full-text pipeline in fusion
  * @param normalization    {@code $scoreFusion} normalization: {@code sigmoid}, {@code minMaxScaler} or {@code none}
  * @param rrfK             constant of reciprocal rank fusion (60 is the usual value)
- * @param minRerankScore   grounding threshold on the top rerank score; null means "not calibrated yet"
+ * @param minRerankScore   retrieval floor on the top rerank score: below it nothing is answerable and the
+ *                         result is NO_RELEVANT_CONTEXT; null means "not calibrated yet"
+ * @param highConfidenceScore a top score at or above this is only marked "high confidence" in the trace; it
+ *                         changes no behaviour; null disables the marker
  */
 @ConfigurationProperties("agentfw.retrieval")
 public record RetrievalProperties(
@@ -31,7 +34,8 @@ public record RetrievalProperties(
         @DefaultValue("1.0") double textWeight,
         @DefaultValue("sigmoid") String normalization,
         @DefaultValue("60") int rrfK,
-        Double minRerankScore) {
+        Double minRerankScore,
+        Double highConfidenceScore) {
 
     public RetrievalProperties {
         if (perPipelineLimit < 1 || fusedLimit < 1 || rerankDepth < 1 || finalTopN < 1) {
@@ -51,17 +55,17 @@ public record RetrievalProperties(
     /** Same settings with another rerank depth; used by the depth experiment. */
     public RetrievalProperties withRerankDepth(int depth) {
         return new RetrievalProperties(fusion, numCandidates, perPipelineLimit, fusedLimit, depth, finalTopN,
-                vectorWeight, textWeight, normalization, rrfK, minRerankScore);
+                vectorWeight, textWeight, normalization, rrfK, minRerankScore, highConfidenceScore);
     }
 
     /** Same settings with another threshold; null scores everything without taking a decision. */
     public RetrievalProperties withMinRerankScore(Double threshold) {
         return new RetrievalProperties(fusion, numCandidates, perPipelineLimit, fusedLimit, rerankDepth, finalTopN,
-                vectorWeight, textWeight, normalization, rrfK, threshold);
+                vectorWeight, textWeight, normalization, rrfK, threshold, highConfidenceScore);
     }
 
     public RetrievalProperties withFusion(FusionStrategy strategy) {
         return new RetrievalProperties(strategy, numCandidates, perPipelineLimit, fusedLimit, rerankDepth, finalTopN,
-                vectorWeight, textWeight, normalization, rrfK, minRerankScore);
+                vectorWeight, textWeight, normalization, rrfK, minRerankScore, highConfidenceScore);
     }
 }

@@ -17,8 +17,12 @@ import java.util.function.ToDoubleFunction;
  */
 public final class CalibrationReport {
 
+    /**
+     * @param minRerankScore      the retrieval floor in force when the report was made; null when none
+     * @param highConfidenceScore informational level recorded in the trace; null when none
+     */
     public record Context(String generatedAt, String embeddingModel, String rerankModel, String fusion,
-                          int fusedLimit, int finalTopN) {
+                          int fusedLimit, int finalTopN, Double minRerankScore, Double highConfidenceScore) {
     }
 
     private CalibrationReport() {
@@ -30,7 +34,7 @@ public final class CalibrationReport {
         StringBuilder md = new StringBuilder();
         md.append("# Grounding threshold calibration\n\n");
         header(md, ctx);
-        body(md, all);
+        body(md, all, ctx);
         return md.toString();
     }
 
@@ -45,9 +49,10 @@ public final class CalibrationReport {
                 .append(" fused candidates scored; the \"depth 12\" columns use only the fused top 12 of those same scores.\n\n");
     }
 
-    private static void body(StringBuilder md, List<QuestionOutcome> all) {
+    private static void body(StringBuilder md, List<QuestionOutcome> all, Context ctx) {
         scoresTable(md, all);
         recall(md, all);
+        gateAtFloor(md, all, ctx);
         List<QuestionOutcome> calibration = all.stream().filter(o -> !o.holdout()).toList();
         List<QuestionOutcome> holdout = all.stream().filter(QuestionOutcome::holdout).toList();
         depthDecision(md, all);
@@ -67,6 +72,15 @@ public final class CalibrationReport {
      *                 are generated, the reading of them is not
      */
     public static String renderComparison(CalibrationRun baseline, CalibrationRun variant, String findings) {
+        return renderComparison(baseline, variant, findings, List.of());
+    }
+
+    /**
+     * @param alsoDetail further runs whose full detail (all sections, including strict and widened recall and the
+     *                   retrieval floor) is appended after the two compared runs
+     */
+    public static String renderComparison(CalibrationRun baseline, CalibrationRun variant, String findings,
+                                          List<CalibrationRun> alsoDetail) {
         Summary a = Summary.of(baseline.outcomes());
         Summary b = Summary.of(variant.outcomes());
         StringBuilder md = new StringBuilder();
@@ -140,10 +154,18 @@ public final class CalibrationReport {
         }
         md.append("\n---\n\n# Detail: ").append(baseline.label()).append("\n\n");
         header(md, baseline.context());
-        body(md, baseline.outcomes());
+        body(md, baseline.outcomes(), baseline.context());
         md.append("\n---\n\n# Detail: ").append(variant.label()).append("\n\n");
         header(md, variant.context());
-        body(md, variant.outcomes());
+        body(md, variant.outcomes(), variant.context());
+        for (CalibrationRun extra : alsoDetail) {
+            md.append("\n---\n\n# Detail: ").append(extra.label()).append("\n\n");
+            if (extra.note() != null && !extra.note().isBlank()) {
+                md.append(extra.note()).append("\n\n");
+            }
+            header(md, extra.context());
+            body(md, extra.outcomes(), extra.context());
+        }
         return md.toString();
     }
 
@@ -151,21 +173,25 @@ public final class CalibrationReport {
 
     private static void scoresTable(StringBuilder md, List<QuestionOutcome> all) {
         md.append("## Every question\n\n");
-        md.append("| id | split | type | top-1 d20 | top-1 d12 | best passage | expected at fused rank | in top 5 d20 | in top 5 d12 | truncated | question |\n");
-        md.append("| --- | --- | --- | ---: | ---: | --- | ---: | :---: | :---: | ---: | --- |\n");
+        md.append("| id | split | type | top-1 d20 | top-1 d12 | best passage | expected at fused rank | in top 5 d20 | in top 5 d12 | top 5 d12 widened | truncated | question |\n");
+        md.append("| --- | --- | --- | ---: | ---: | --- | ---: | :---: | :---: | :---: | ---: | --- |\n");
         for (QuestionOutcome o : all) {
-            md.append(String.format(Locale.ROOT, "| %s | %s | %s%s | %.2f | %.2f | %s | %s | %s | %s | %d | %s |%n",
+            md.append(String.format(Locale.ROOT, "| %s | %s | %s%s | %.2f | %.2f | %s | %s | %s | %s | %s | %d | %s |%n",
                     o.id(), o.split(), o.type(), o.paraphrase() ? " (paraphrase)" : "", o.top1Depth20(), o.top1Depth12(),
                     o.top1Where(), o.inCorpus() ? rank(o) : "-",
                     o.inCorpus() ? yes(o.inTop5Depth20()) : "-",
                     o.inCorpus() ? yes(o.inTop5Depth12()) : "-",
+                    o.inCorpus() ? yes(o.inTop5Depth12Widened()) : "-",
                     o.truncatedPairs(), o.question()));
         }
         md.append("\n");
     }
 
     private static void recall(StringBuilder md, List<QuestionOutcome> all) {
-        md.append("## Recall of the answer-bearing page (in-corpus questions)\n\n");
+        md.append("## Recall of the answer-bearing page (in-corpus questions), strict / widened\n\n");
+        md.append("Strict: the page contains the question's evidence phrase (fixed before the first run). ")
+                .append("Widened: also the adjacent, near-duplicate or equivalent pages added afterwards ")
+                .append("(rules and reasons: Findings, section 2). Each cell reads strict / widened.\n\n");
         md.append("| set | n | in fused top 20 | in fused top 12 | in final top 5, depth 20 | in final top 5, depth 12 |\n");
         md.append("| --- | ---: | ---: | ---: | ---: | ---: |\n");
         for (var group : List.of(
@@ -175,13 +201,48 @@ public final class CalibrationReport {
                 new Group("all", QuestionOutcome::inCorpus))) {
             List<QuestionOutcome> g = all.stream().filter(group.filter()).toList();
             long f20 = g.stream().filter(o -> o.expectedFusedRank() != null).count();
+            long f20w = g.stream().filter(o -> o.expectedFusedRankWidened() != null).count();
             long f12 = g.stream().filter(o -> o.expectedFusedRank() != null && o.expectedFusedRank() <= 12).count();
+            long f12w = g.stream()
+                    .filter(o -> o.expectedFusedRankWidened() != null && o.expectedFusedRankWidened() <= 12).count();
             long t20 = g.stream().filter(QuestionOutcome::inTop5Depth20).count();
+            long t20w = g.stream().filter(QuestionOutcome::inTop5Depth20Widened).count();
             long t12 = g.stream().filter(QuestionOutcome::inTop5Depth12).count();
-            md.append(String.format(Locale.ROOT, "| %s | %d | %d | %d | %d | %d |%n",
-                    group.name(), g.size(), f20, f12, t20, t12));
+            long t12w = g.stream().filter(QuestionOutcome::inTop5Depth12Widened).count();
+            md.append(String.format(Locale.ROOT, "| %s | %d | %d / %d | %d / %d | %d / %d | %d / %d |%n",
+                    group.name(), g.size(), f20, f20w, f12, f12w, t20, t20w, t12, t12w));
         }
         md.append("\n");
+    }
+
+    /** What the retrieval floor and the high-confidence marker do to each question type. */
+    private static void gateAtFloor(StringBuilder md, List<QuestionOutcome> all, Context ctx) {
+        md.append("## Retrieval floor and high-confidence marker (depth 12, the configured depth)\n\n");
+        if (ctx.minRerankScore() == null) {
+            md.append("No floor was configured for this run.\n\n");
+            return;
+        }
+        double floor = ctx.minRerankScore();
+        Double high = ctx.highConfidenceScore();
+        md.append(String.format(Locale.ROOT, "Floor **%.2f**: a top score below it gives NO_RELEVANT_CONTEXT, at or above ", floor));
+        md.append("it the chunks go to the answering step. ");
+        if (high != null) {
+            md.append(String.format(Locale.ROOT, "High-confidence marker **%.2f**: trace only, no behaviour change.", high));
+        }
+        md.append("\n\n| type | n | below floor (rejected here) | at or above floor (passed on) | of those, high confidence |\n");
+        md.append("| --- | ---: | ---: | ---: | ---: |\n");
+        for (String type : List.of("IN_CORPUS", "OUT_FAR", "OUT_NEAR", "OUT_AWS")) {
+            List<QuestionOutcome> g = all.stream().filter(o -> o.type().equals(type)).toList();
+            if (g.isEmpty()) {
+                continue;
+            }
+            long below = g.stream().filter(o -> o.top1Depth12() < floor).count();
+            long hc = high == null ? 0 : g.stream().filter(o -> o.top1Depth12() >= high).count();
+            md.append(String.format(Locale.ROOT, "| %s | %d | %d | %d | %d |%n", type, g.size(), below,
+                    g.size() - below, hc));
+        }
+        md.append("\nOut-of-corpus questions that pass the floor are not wrongly answered by retrieval: ")
+                .append("they are handed to the answering step, whose citation and quote check must reject them.\n\n");
     }
 
     private static void depthDecision(StringBuilder md, List<QuestionOutcome> all) {

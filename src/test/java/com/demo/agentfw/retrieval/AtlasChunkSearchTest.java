@@ -39,7 +39,7 @@ class AtlasChunkSearchTest {
     private static final float[] QUERY_VECTOR = {0.85f, 0.15f, 0.0f};   // closest to the refund chunk
 
     private static final RetrievalProperties BASE = new RetrievalProperties(
-            FusionStrategy.RANK, 20, 3, 3, 3, 3, 1.0, 1.0, "sigmoid", 60, null);
+            FusionStrategy.RANK, 20, 3, 3, 3, 3, 1.0, 1.0, "sigmoid", 60, null, null);
 
     @BeforeAll
     void setUp() throws Exception {
@@ -154,7 +154,7 @@ class AtlasChunkSearchTest {
 
     @Test
     void fusedLimitCutsTheListButNotTheHitCounts() {
-        RetrievalProperties one = new RetrievalProperties(FusionStrategy.RANK, 20, 3, 1, 1, 1, 1.0, 1.0, "sigmoid", 60, null);
+        RetrievalProperties one = new RetrievalProperties(FusionStrategy.RANK, 20, 3, 1, 1, 1, 1.0, 1.0, "sigmoid", 60, null, null);
 
         SearchOutcome out = search.search("refund days", QUERY_VECTOR, one);
 

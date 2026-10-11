@@ -35,8 +35,13 @@ agentfw:
     text-weight: 1.0
     normalization: sigmoid       # $scoreFusion only
     rrf-k: 60
-    # min-rerank-score: set from the calibration (docs/CALIBRATION.md). Unset means "not calibrated",
-    # and the grounding gate reports NOT_CALIBRATED instead of guessing.
+    # Retrieval floor, from docs/CALIBRATION.md: just below the lowest top-1 score of any in-corpus question
+    # of the calibration set (-6.38, rounded down), so it removes only clear junk and no in-corpus question.
+    # Unset would mean "not calibrated" and the gate would report NOT_CALIBRATED.
+    min-rerank-score: -6.5
+    # Informational only: the trace marks a top score at or above this as "high confidence". No behaviour change.
+    # 3.3 is the balanced-accuracy optimum of the baseline calibration.
+    high-confidence-score: 3.3
   ingestion:
     corpus-dir: corpus
     on-startup: false

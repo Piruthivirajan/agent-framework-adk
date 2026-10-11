@@ -49,6 +49,17 @@ Decisions: reranker `ms-marco-MiniLM-L6-v2` fp32 as baseline, int8 chosen only i
 
 - **Hosting decision needs a measurement:** rerank latency on a small cloud CPU will be several times the laptop number (about 1.8 s for 20 chunks, single predictor, on an i7-10850H 6C/12T). Measure rerank latency on the target host before choosing the hosting tier; if too slow, options are the int8 model, a smaller rerank depth, or a hosted reranker behind the same `Reranker` interface.
 
+## Day 4 requirements (decided by the user after the Day 3 calibration)
+
+Retrieval gate (done, Day 3): a low **floor** at -6.5 removes only clear junk; 3.3 is recorded as "high confidence" in the trace only. The real grounding decision moves to the answering step:
+
+- [ ] RAG agent output contract: **every claim is cited as [file, page] and carries a short verbatim supporting quote** from the cited chunk.
+- [ ] **`GroundingVerifier`** (deterministic, after the LLM): for every citation, the quote must be found in the text of the retrieved chunk that was cited, compared after whitespace normalisation. If any quote is not found, or a cited [file, page] was not retrieved, the answer is replaced by **"Not found in the reference documents."** Purpose: stop the model answering OUT_AWS questions (a quota, a price) from its own training knowledge. Unit-tested without any LLM.
+- [ ] **End-to-end run of all 48 calibration questions** through the real coordinator and RAG agent, reported **per question type** (IN_CORPUS, OUT_FAR, OUT_NEAR, OUT_AWS): correct answers, false answers (an answer to an unanswerable question, or a wrong answer), and false "not found". Strict and widened expected pages both reported.
+- [ ] Before building: verify the ADK 1.11.0 class and method names (`AgentTool`, `FunctionTool.create`, `LlmAgent`, tool context) against the jar; the skeleton in PLAN.md predates it.
+- [ ] Paraphrased questions were 0 of 2 at retrieval: test whether the agent's query rewriting (up to 3 `searchDocuments` calls) recovers them.
+- [ ] Definitional "what is X" questions score low with the MS MARCO cross-encoder even when the right page is retrieved (in-03, in-17); the floor is deliberately below them. Check that the verifier, not the floor, is what protects against false answers.
+
 ## Watch list
 
 - The skeleton code in PLAN.md (`StreamableHttpServerParameters`, `AgentTool`, `FunctionTool.create`, `McpToolset`) was written against an older ADK. Before using any of them (Day 4 and Day 6), check the class and method names against the ADK 1.11.0 javadoc or sources.

@@ -10,16 +10,16 @@ import static org.assertj.core.api.Assertions.assertThat;
 class CalibrationReportTest {
 
     private static final CalibrationReport.Context CTX =
-            new CalibrationReport.Context("2026-10-10T00:00:00Z", "emb", "rr", "RANK", 20, 5);
+            new CalibrationReport.Context("2026-10-10T00:00:00Z", "emb", "rr", "RANK", 20, 5, -6.5, 3.3);
 
     private static QuestionOutcome in(String id, String split, double d20, double d12, Integer expectedRank,
                                       boolean top5d20, boolean top5d12) {
         return new QuestionOutcome(id, "IN_CORPUS", split, "question " + id, d20, "doc p1", d12, expectedRank,
-                top5d20, top5d12, 0, 100, 200, false);
+                top5d20, top5d12, 0, 100, 200, false, expectedRank, top5d20, top5d12, List.of());
     }
 
     private static QuestionOutcome out(String id, String type, String split, double d20) {
-        return new QuestionOutcome(id, type, split, "question " + id, d20, "doc p9", d20, null, false, false, 0, 100, 200, false);
+        return new QuestionOutcome(id, type, split, "question " + id, d20, "doc p9", d20, null, false, false, 0, 100, 200, false, null, false, false, List.of());
     }
 
     private static List<QuestionOutcome> sample() {
@@ -81,9 +81,9 @@ class CalibrationReportTest {
         String md = CalibrationReport.render(sample(), CTX);
 
         // calibration in-corpus: 3 questions; in fused top 20: 3; in fused top 12: 2; top5 d20: 3; top5 d12: 2
-        assertThat(md).contains("| calibration | 3 | 3 | 2 | 3 | 2 |");
-        assertThat(md).contains("| holdout | 1 | 1 | 1 | 1 | 1 |");
-        assertThat(md).contains("| all | 4 | 4 | 3 | 4 | 3 |");
+        assertThat(md).contains("| calibration | 3 | 3 / 3 | 2 / 2 | 3 / 3 | 2 / 2 |");
+        assertThat(md).contains("| holdout | 1 | 1 / 1 | 1 / 1 | 1 / 1 | 1 / 1 |");
+        assertThat(md).contains("| all | 4 | 4 / 4 | 3 / 3 | 4 / 4 | 3 / 3 |");
     }
 
     @Test
@@ -131,10 +131,63 @@ class CalibrationReportTest {
     void paraphrasedQuestionsGetTheirOwnRecallRow() {
         List<QuestionOutcome> o = new ArrayList<>(sample());
         o.add(new QuestionOutcome("in-p", "IN_CORPUS", "calibration", "paraphrased", 3.0, "doc p1", 3.0, 7,
-                true, true, 0, 100, 200, true));
+                true, true, 0, 100, 200, true, 7, true, true, List.of()));
 
         String md = CalibrationReport.render(o, CTX);
 
-        assertThat(md).contains("| paraphrased (semantic path) | 1 | 1 | 1 | 1 | 1 |");
+        assertThat(md).contains("| paraphrased (semantic path) | 1 | 1 / 1 | 1 / 1 | 1 / 1 | 1 / 1 |");
+    }
+
+    @Test
+    void strictAndWidenedAreReportedSideBySide() {
+        List<QuestionOutcome> o = new ArrayList<>();
+        // missed strictly, found once adjacent/equivalent pages are accepted
+        o.add(new QuestionOutcome("in-w", "IN_CORPUS", "calibration", "q", 5.0, "doc p2", 5.0, null, false, false,
+                0, 100, 200, false, 3, true, true, List.of("doc p2")));
+        o.add(in("in-s", "calibration", 6.0, 6.0, 1, true, true));
+        o.add(out("far-1", "OUT_FAR", "calibration", -9.0));
+
+        String md = CalibrationReport.render(o, CTX);
+
+        assertThat(md).contains("| all | 2 | 1 / 2 | 1 / 2 | 1 / 2 | 1 / 2 |");
+        assertThat(md).contains("Each cell reads strict / widened");
+    }
+
+    @Test
+    void floorTablePerTypeShowsWhatIsRejectedAndWhatIsHighConfidence() {
+        List<QuestionOutcome> o = new ArrayList<>();
+        o.add(in("in-1", "calibration", 9.0, 9.0, 1, true, true));    // passes, high confidence (>= 3.3)
+        o.add(in("in-2", "calibration", -2.0, -2.0, 2, true, true));  // passes, not high confidence
+        o.add(out("far-1", "OUT_FAR", "calibration", -9.0));          // below the floor of -6.5
+        o.add(out("far-2", "OUT_FAR", "calibration", -7.0));          // below the floor
+        o.add(out("aws-1", "OUT_AWS", "calibration", 1.0));           // passes the floor, handed on
+
+        String md = CalibrationReport.render(o, CTX);
+
+        assertThat(md).contains("Floor **-6.50**").contains("High-confidence marker **3.30**");
+        assertThat(md).contains("| IN_CORPUS | 2 | 0 | 2 | 1 |");
+        assertThat(md).contains("| OUT_FAR | 2 | 2 | 0 | 0 |");
+        assertThat(md).contains("| OUT_AWS | 1 | 0 | 1 | 0 |");
+    }
+
+    @Test
+    void aRunWithoutAFloorSaysSo() {
+        CalibrationReport.Context none = new CalibrationReport.Context("t", "e", "r", "RANK", 20, 5, null, null);
+
+        assertThat(CalibrationReport.render(sample(), none)).contains("No floor was configured for this run.");
+    }
+
+    @Test
+    void extraRunsAreAppendedAsDetail() {
+        CalibrationRun a = new CalibrationRun("baseline", "one", CTX, sample());
+        CalibrationRun b = new CalibrationRun("stripped", "two", CTX, sample());
+        CalibrationRun c = new CalibrationRun("final", "headers kept, floor set", CTX, sample());
+
+        String md = CalibrationReport.renderComparison(a, b, "## Findings\n\ntext", List.of(c));
+
+        assertThat(md).contains("# Detail: baseline").contains("# Detail: stripped").contains("# Detail: final");
+        assertThat(md).contains("headers kept, floor set");
+        assertThat(md.indexOf("# Detail: final")).isGreaterThan(md.indexOf("# Detail: stripped"));
+        assertThat(md.indexOf("## Findings")).isLessThan(md.indexOf("## Side by side"));
     }
 }
