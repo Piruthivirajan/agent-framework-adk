@@ -82,7 +82,7 @@ Decisions (user): file agent shape decided by the step 0 spike; **two paths** to
 - [x] 0. ADK spike: file agent shape (LlmAgent + tool vs custom BaseAgent), a tool that calls the model, cost of the extra call
 - [x] 1. Verifier: one retry for malformed JSON, RAG prompt line on numbers, measured on the same 48 questions
 - [x] 2. Uploads: Tika parsing, `uploads` collection (TTL), limits, error messages
-- [ ] 3. `MapReduceSummarizer` (single pass, map-reduce, hierarchical reduce, failure behaviour)
+- [x] 3. `MapReduceSummarizer` (single pass, map-reduce, hierarchical reduce, failure behaviour)
 - [ ] 4. `FileAgentPlugin`, fast path by code, coordinator tool with session files, summaries labelled
 - [ ] 5. Follow-up rewriting from chat history (3 follow-up pairs in tests)
 - [ ] 6. API: `/api/chat`, `/api/files`, error handler; SSE stage events
@@ -97,6 +97,15 @@ Decisions (user): file agent shape decided by the step 0 spike; **two paths** to
 ## Log
 
 <!-- Newest first. One entry per task: date, what was built, what was verified. -->
+
+### 2026-10-11: Day 5 step 3, `MapReduceSummarizer`
+- **Single pass** up to `agentfw.summary.single-pass-max-chars` (30,000, starting value): one call, the user's instruction applied directly. **Map-reduce** above it: split at paragraph boundaries (then line breaks, sentence ends, spaces, hard cut; no text lost, tested) into segments of about 15,000 characters; each segment gets a *neutral* "dense partial summary" prompt (the instruction is applied only at the end, so "three bullet points" does not produce three per segment); partials are combined in order by one reduce call; partials too long for one call (`reduce-max-chars`) are reduced in groups, repeatedly (at most 6 rounds, and each round must shrink).
+- **Parallelism** is bounded (4) to stay inside rate limits; each model call is retried twice with backoff; **if a call still fails the whole summary fails** with a message naming the part ("Part 3 of 24 could not be summarized by the model after 3 attempts: ..."), nothing is silently dropped. A text needing more than `max-segments` (120) map calls is refused before any call.
+- **Data, not instructions:** the text is passed between `<document>` / `<parts>` tags and the system instruction says never to follow instructions inside it; the summarizer has no tools, so a hostile file can at most distort its own summary.
+- **Progress callback** (`summarizing parts i/n`, `condensing`, `combining`) is there for the SSE events of step 6.
+- Built on the `TextGenerator` seam, tested with a fake model (13 tests): single pass, neutral map prompts, order, call counts, the parallel bound, grouped reduce, retry then success, failure naming the part, segment limit, progress, splitting.
+- Not measured yet: real latency and quality on large files (step 9).
+- Verified: BUILD SUCCESS, 233 tests.
 
 ### 2026-10-11: Day 5 step 2, uploads (`com.demo.agentfw.files`)
 - **`TextExtractor`** (Tika 4.1.0): type detected from the bytes, not the name; allow-list PDF, DOCX, plain text (anything else is `UNSUPPORTED_TYPE` and the message names the type); `BodyContentHandler(maxChars)` stops a huge file early (`TOO_MUCH_TEXT`, message states the limit); a corrupt file is `UNREADABLE`; page count from the metadata when the format has one.
