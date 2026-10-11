@@ -9,9 +9,9 @@ only store. One chat page, one coordinator, and agents that are plugins:
 - **MCP tools** that a user connects at run time from a settings page (Streamable HTTP and SSE, custom
   auth headers), used when the documents have no answer.
 
-> Status: draft written before the final evaluation run. Numbers marked **[FINAL RUN]** are placeholders
-> to be replaced from `docs/END_TO_END.md` and `docs/FUSION.md` after that run; every other number comes
-> from a run documented in `docs/PROGRESS.md` and is labelled with how it was measured.
+> Status: draft written before the final end-to-end run. Numbers marked **[FINAL RUN]** are placeholders
+> to be replaced from `docs/END_TO_END.md` after that run (and the VM rerank latency); every other number
+> comes from a run documented in `docs/PROGRESS.md` and is labelled with how it was measured.
 
 ## The four scenarios it is built around
 
@@ -114,7 +114,7 @@ decided in code, never from the coordinator's prose:
 | decision | why | evidence |
 | --- | --- | --- |
 | **MongoDB is the only store** (vectors, BM25, chunks, uploads) | one system to run, back up and explain; hybrid search with native `$rankFusion`/`$scoreFusion` | Day 1 spike, `docs/PROGRESS.md` |
-| **Hybrid retrieval + cross-encoder rerank**, depth 12 | BM25 catches exact terms, vectors catch paraphrase, the cross-encoder fixes the order | rerank depth 12 kept the answer page in the final 5 for all 32 questions that depth 20 did (`docs/CALIBRATION.md`) |
+| **Hybrid retrieval + cross-encoder rerank**, depth 12, fused with `$rankFusion` | BM25 catches exact terms, vectors catch paraphrase, the cross-encoder fixes the order; reciprocal rank fusion needs no score scales | depth 12 kept the answer page in the final 5 for all 32 questions that depth 20 did (`docs/CALIBRATION.md`); `$scoreFusion` was not better (`docs/FUSION.md`) |
 | **A low retrieval floor; the answering step decides** | cross-encoder scores of answerable and unanswerable questions overlap (in-corpus lowest -6.38, out-of-corpus highest 3.17), so no single threshold separates them | `docs/CALIBRATION.md` §1 |
 | **Claims must carry verbatim quotes, checked in code** | a model can write a fluent answer from memory; a quote that must exist in the retrieved text cannot be faked, and the check costs no model call | adversarial questions: `docs/e2e/findings.md` §7 |
 | **Strict numeric rule** (a number in a claim must be in its quote) | closes the most dangerous gap: a real but unrelated quote next to a figure from memory | the live catch of `256 KB` for SQS |
@@ -161,9 +161,20 @@ from memory): with the production prompt the model refused itself in 12 of 12 tr
 nothing to catch); with a deliberately permissive prompt it answered once in 12 and **the verifier caught
 it**; no wrong answer was shown (`docs/e2e/findings.md` §7). **[FINAL RUN]**: repeat on the final build.
 
-**Fusion strategy** (`$rankFusion` vs `$scoreFusion`, retrieval only, no model calls):
-**[FINAL RUN]** `docs/FUSION.md`. Run:
-`./mvnw spring-boot:run "-Dspring-boot.run.arguments=--agentfw.calibration.run=true --agentfw.retrieval.fusion=SCORE --agentfw.calibration.label=score --agentfw.calibration.output=docs/FUSION.md"`.
+**Fusion strategy: `$rankFusion` vs `$scoreFusion`** (`docs/FUSION.md`; same 48 questions, same
+embeddings and reranker, retrieval only, no chat-model calls; `$scoreFusion` with sigmoid normalisation and
+equal weights, untuned):
+
+| answer page of the 32 in-corpus questions | `$rankFusion` (strict / widened) | `$scoreFusion` (strict / widened) |
+| --- | ---: | ---: |
+| in the fused top 20 | 29 / 31 | 28 / 29 |
+| in the final top 5 sent to the model (rerank 12) | 26 / 31 | 25 / 29 |
+
+`$rankFusion` is equal or better on every measure; the largest gap is one question (strict) or two
+(widened) of 32, so this shows that `$scoreFusion` is not better here, not that it is worse in general.
+`$scoreFusion` lost "What is the AWS Well-Architected Tool?" (answer page not in its fused top 20) and
+gained "What is the principle of least privilege?" at depth 20 only. The widened pages were chosen after
+reading `$rankFusion` results, so the strict columns are the fair ones. Decision: keep `RANK`.
 
 **Large files** (Tika extraction + map-reduce, `scripts/live-file-summary-check.py`, single runs): 40 pages
 19 s, 124 pages 26 s, 240 pages 65 s, 274 pages 70 s, 1,003 pages 247 s. About 3 s plus 10 s per 100,000

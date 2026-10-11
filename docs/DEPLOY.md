@@ -58,7 +58,7 @@ sha256 mismatch); wait for the application's health check; wait for "Ingestion f
 2. Upload a small text file and ask for a summary; add the demo MCP server and ask about order ORD-1001
    (`docs/DEMO_MCP.md`, with the host `demo-mcp`).
 3. `docker compose -f docker-compose.prod.yml ps` shows `app` healthy, `mongodb` healthy.
-4. Gemini quota: the free tier has low requests-per-minute limits; the first ingestion embeds about 1,900
+4. Gemini quota: the free tier has low requests-per-minute limits; the first ingestion embeds about 2,350
    passages and may need minutes of retries. A paid key removes the wait. A 429 during a chat shows
    "The language model is rate limited right now ...".
 

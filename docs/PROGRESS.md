@@ -13,7 +13,7 @@ Source of truth for scope: [PLAN.md](PLAN.md). Update this file after every task
 - [x] Credential hygiene: masked in UI and API, never logged, never sent to the model
 - [x] Graceful failures: wrong MCP URL or token, MCP server down, Gemini timeout each show a clear UI message ("Invalid credentials", "Unable to connect to MCP server"), never a stack trace
 - [x] Trace panel under each answer: route chosen, tool calls, vector and BM25 hit counts, fused top 20, rerank scores, latency per stage
-- [ ] Small eval: 15 to 20 golden questions, precision@5 for `$rankFusion` vs `$scoreFusion`
+- [x] Small eval: 15 to 20 golden questions, precision@5 for `$rankFusion` vs `$scoreFusion` (48 questions, `docs/FUSION.md`)
 - [ ] Reachable deployment with a seeded corpus
 
 ## Day 1 spike (done when all checked)
@@ -112,6 +112,12 @@ Decisions (user): file agent shape decided by the step 0 spike; **two paths** to
 ## Log
 
 <!-- Newest first. One entry per task: date, what was built, what was verified. -->
+
+### 2026-10-11: Day 7 prep, `$rankFusion` vs `$scoreFusion` (`docs/FUSION.md`)
+- **Method:** the existing calibration runner twice on the 48 questions, back to back, only `agentfw.retrieval.fusion` differing (`RANK`, `SCORE` with sigmoid normalisation and weights 1.0/1.0); retrieval only, so 48 query embeddings per run and no chat-model call. Saved runs `docs/fusion/rank.json` and `score.json`; hand-written findings in `docs/fusion/findings.md`.
+- **Result (rerank depth 12):** answer page in the fused top 20: **29 / 31 (RANK) vs 28 / 29 (SCORE)** strict / widened; in the final top 5: **26 / 31 vs 25 / 29**; at depth 20 the strict top-5 count is 26 for both. 22 of 32 questions differ in some page position; the ones that matter: SCORE loses in-04 "What is the AWS Well-Architected Tool?" (not in its fused 20) and the in-31 paraphrase when widened, and gains in-11 (least privilege) at depth 20 only. The out-of-corpus top-1 score groups are about the same and still overlap, so the floor design is unaffected.
+- **Decision: keep RANK.** Equal or better everywhere at the configured depth, and it needs no score scale. **Limits:** 32 questions, one run each, a difference of one or two questions; SCORE was run untuned (a tuned `$scoreFusion` could do better, and tuning on 48 questions would fit the set); the widened pages were chosen after reading RANK results and so favour it (the strict numbers are the fair ones). `JAVA_RRF` not run (same algorithm as RANK).
+- **Housekeeping found on the way:** the database holds 2,353 chunks (not "about 1,900") for the 10 documents; docs corrected.
 
 ### 2026-10-11: Day 7 prep (no cloud actions): SSRF guard, deployment files, README draft
 - **SSRF guard (`McpUrlGuard`, `agentfw.mcp.allowed-hosts` / `AGENTFW_MCP_ALLOWED_HOSTS`):** an MCP URL whose host resolves to any private (RFC 1918), loopback, link-local (169.254.0.0/16, fe80::/10, the cloud metadata address), carrier-grade NAT (100.64/10), benchmarking, reserved, multicast, unspecified, unique-local (fc00::/7), 6to4 or NAT64 address is refused, including IPv4 written as a number, mapped into IPv6, or with credentials in the URL; a host written only in digits that does not resolve (hex, octal) is refused too (fail closed). The allowlist exempts a host by name only (`demo-mcp`, `localhost`); the address it resolves to is not exempt for other names. Applied at test, save, update and again before each connection. UI and API say: "This address is not allowed: ... the administrator must allow its host name in AGENTFW_MCP_ALLOWED_HOSTS" (400 `BLOCKED_ADDRESS`; the test endpoint returns it as the test error). **Tests:** 36 (25 blocked literals, 7 public literals, allowlist semantics, registry save/test/update). **Limits stated:** DNS rebinding between the check and the SDK's own resolution is not covered, and the SDK's HTTP client may follow redirects (the probe does not); an egress rule is the complete answer.
