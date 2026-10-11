@@ -4,6 +4,7 @@ import com.demo.agentfw.files.FileProperties;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
@@ -29,7 +30,7 @@ class GlobalExceptionHandler {
 
     @ExceptionHandler(MaxUploadSizeExceededException.class)
     ResponseEntity<ApiError> tooLarge(MaxUploadSizeExceededException e) {
-        return ResponseEntity.status(HttpStatus.CONTENT_TOO_LARGE).body(new ApiError("TOO_LARGE",
+        return json(HttpStatus.CONTENT_TOO_LARGE, new ApiError("TOO_LARGE",
                 "The file is larger than the limit of " + String.format(Locale.ROOT, "%.0f", files.maxBytes() / 1e6)
                         + " MB."));
     }
@@ -38,13 +39,13 @@ class GlobalExceptionHandler {
     ResponseEntity<ApiError> invalid(MethodArgumentNotValidException e) {
         String message = e.getBindingResult().getFieldErrors().stream().findFirst()
                 .map(f -> f.getField() + ": " + f.getDefaultMessage()).orElse("The request is not valid.");
-        return ResponseEntity.badRequest().body(new ApiError("BAD_REQUEST", ErrorMapping.clean(message)));
+        return json(HttpStatus.BAD_REQUEST, new ApiError("BAD_REQUEST", ErrorMapping.clean(message)));
     }
 
     @ExceptionHandler({HttpMessageNotReadableException.class, MissingServletRequestParameterException.class,
             MissingServletRequestPartException.class})
     ResponseEntity<ApiError> unreadable(Exception e) {
-        return ResponseEntity.badRequest().body(new ApiError("BAD_REQUEST",
+        return json(HttpStatus.BAD_REQUEST, new ApiError("BAD_REQUEST",
                 "The request is incomplete or not valid JSON."));
     }
 
@@ -52,10 +53,19 @@ class GlobalExceptionHandler {
     ResponseEntity<ApiError> anyOther(Exception e) {
         ErrorMapping.Mapped mapped = ErrorMapping.of(e);
         if (mapped.status() == HttpStatus.INTERNAL_SERVER_ERROR) {
-            log.error("request failed: {}", e.toString(), e);   // the trace goes to the log, not to the client
+            log.error("request failed: {}", com.demo.agentfw.core.Secrets.mask(e.toString()), e);   // the trace goes to the log, not to the client
         } else if (mapped.status().is5xxServerError()) {
-            log.warn("request failed ({}): {}", mapped.error().code(), e.toString());
+            log.warn("request failed ({}): {}", mapped.error().code(), com.demo.agentfw.core.Secrets.mask(e.toString()));
         }
-        return ResponseEntity.status(mapped.status()).body(mapped.error());
+        return json(mapped.status(), mapped.error());
+    }
+
+    /**
+     * An error is always JSON, whatever the request's Accept header says: the streaming endpoints are
+     * called with {@code Accept: text/event-stream}, and without an explicit type the error body could
+     * not be negotiated and the client would get an empty 500.
+     */
+    private static ResponseEntity<ApiError> json(HttpStatus status, ApiError error) {
+        return ResponseEntity.status(status).contentType(MediaType.APPLICATION_JSON).body(error);
     }
 }

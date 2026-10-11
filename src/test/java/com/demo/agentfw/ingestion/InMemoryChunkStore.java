@@ -8,7 +8,7 @@ import java.util.Map;
 import java.util.TreeMap;
 
 /** Test double for {@link ChunkStore}; keeps chunks in memory and counts writes. */
-class InMemoryChunkStore implements ChunkStore {
+public class InMemoryChunkStore implements ChunkStore {
 
     private final Map<String, Map<String, List<StoredChunk>>> byTenant = new HashMap<>();
     private int replaceCalls;

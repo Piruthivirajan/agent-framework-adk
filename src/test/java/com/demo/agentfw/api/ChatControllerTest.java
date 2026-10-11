@@ -172,8 +172,11 @@ class ChatControllerTest {
     @Test
     void theStreamRejectsAnInvalidRequestBeforeItStarts() throws Exception {
         mvc.perform(post("/api/chat/stream").contentType(MediaType.APPLICATION_JSON)
-                        .content(body("tab-1", null, null)))
-                .andExpect(status().isBadRequest());
+                        .accept(MediaType.TEXT_EVENT_STREAM).content(body("tab-1", null, null)))
+                .andExpect(status().isBadRequest())
+                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.content()
+                        .contentTypeCompatibleWith(MediaType.APPLICATION_JSON))
+                .andExpect(jsonPath("$.code").value("BAD_REQUEST"));
 
         ArgumentCaptor<Object> none = ArgumentCaptor.forClass(Object.class);
         org.mockito.Mockito.verifyNoInteractions(chat);

@@ -86,7 +86,7 @@ Decisions (user): file agent shape decided by the step 0 spike; **two paths** to
 - [x] 4. `FileAgentPlugin`, fast path by code, coordinator tool with session files, summaries labelled
 - [x] 5. Follow-up rewriting from chat history (3 follow-up pairs in tests)
 - [x] 6. API: `/api/chat`, `/api/files`, error handler; SSE stage events
-- [ ] 7. Knowledge base: `POST /api/kb/documents`, single-file ingestion with progress, no-text-layer rejection
+- [x] 7. Knowledge base: `POST /api/kb/documents`, single-file ingestion with progress, no-text-layer rejection
 - [ ] 8. UI: chat, attach/paste, sources, trace panel, progress, KB upload; verified in the browser on A, B, C
 - [ ] 9. Scenario C measurement (small TXT, 20-page PDF, the 300+ page PDF), final limits from the numbers
 
@@ -97,6 +97,14 @@ Decisions (user): file agent shape decided by the step 0 spike; **two paths** to
 ## Log
 
 <!-- Newest first. One entry per task: date, what was built, what was verified. -->
+
+### 2026-10-11: Day 5 step 7, "add to knowledge base" (`POST /api/kb/documents`)
+- **Separate from the chat attachment:** an attachment is read by the file agent for one session and expires; a knowledge base document is chunked, embedded and searchable by the RAG agent. `KnowledgeBaseService` saves the PDF into the corpus folder and runs the existing idempotent `IngestionJob` for that one file (`IngestionJob.ingestFile`, with progress `parsing`, `chunking`, `embedding done/total`, `storing`; the single file is embedded in slices of 16 so progress is visible, the corpus job still embeds in one call).
+- **Two phases:** `check` validates and writes only a temporary file (PDF header, size, safe name, readable, **has a text layer**, no silent overwrite); `add` moves it in and ingests. A scan is rejected in `check`, before anything is saved, so it can never wipe the chunks of an existing document of the same name (tested). A different document with the same name is 409 `EXISTS` unless `replace=true`; the same bytes are `UNCHANGED` with no embedding call. If ingestion fails the previous file and chunks are restored and a new file is not left behind. One addition at a time (409 `BUSY` otherwise).
+- **Endpoint:** the multipart upload is validated synchronously, so a bad file is an ordinary 4xx `{code, message}` (415 not a PDF, 422 no text layer / unreadable, 413 too large, 409 exists / busy); an accepted file streams `stage` events then `result` (`INGESTED` or `UNCHANGED`, pages, chunks, replaced) or `error`. `GET /api/kb/documents` lists the folder with chunk counts.
+- **Bug found by the live check and fixed:** with `Accept: text/event-stream` (what the UI sends to a streaming endpoint) a rejection came back as an empty HTTP 500, because the JSON error body could not be negotiated against that Accept header. Every error response now carries `Content-Type: application/json` explicitly; tests send the streaming Accept header on rejection paths. API keys are also masked in log lines (`Secrets.mask`), not only in responses.
+- **Live (real Gemini embeddings, real MongoDB, scratch corpus folder):** a 1-page PDF with a unique fact was added in 2.0 s (embedding 1.4 s) and **was answered correctly by the RAG agent immediately afterwards** (first question, no wait for the search index), cited as `[kb-live-test.pdf, p. 1]`; the same file again was `UNCHANGED` in 0.0 s; a scan gave 422 `NO_TEXT_LAYER`, a text file named `.pdf` gave 415. The test document was then removed from the database (10 documents again). One document, one run: index lag for a large PDF is not measured.
+- Verified: BUILD SUCCESS, 290 tests.
 
 ### 2026-10-11: Day 5 step 6, HTTP API, error mapping, SSE stage events (checked live)
 - **Endpoints:** `POST /api/chat` (JSON `{sessionId, message, fileId?}` returns the finished turn), `POST /api/chat/stream` (the same turn as server-sent events: one `stage` event per stage, then `result` or `error`), `POST /api/files` (multipart: a `file` part, or pasted text in a `text` field, same extraction and limits), `GET /api/files?sessionId=`. Turns of one session are serialized (a double click cannot interleave two turns in one ADK session). Validation: session id pattern, message at most 4,000 characters, file id shape; a file id without text gets "Summarize this file."

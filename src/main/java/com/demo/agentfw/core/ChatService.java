@@ -158,7 +158,7 @@ public class ChatService {
         } catch (ChatFailedException e) {
             throw e;
         } catch (RuntimeException e) {
-            log.error("chat request={} failed: {}", requestId, e.toString());
+            log.error("chat request={} failed: {}", requestId, Secrets.mask(e.toString()));
             throw new ChatFailedException("The model could not complete the request: " + e.getMessage(), e);
         } finally {
             ledger.clear(requestId);

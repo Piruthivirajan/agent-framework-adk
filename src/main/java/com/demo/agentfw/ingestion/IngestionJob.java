@@ -33,6 +33,7 @@ import java.util.stream.Stream;
 public class IngestionJob {
 
     private static final Logger log = LoggerFactory.getLogger(IngestionJob.class);
+    private static final int PROGRESS_SLICE = 16;
 
     private final AgentFwProperties app;
     private final IngestionProperties props;
@@ -53,6 +54,54 @@ public class IngestionJob {
 
     public IngestionResult run() {
         return run(Path.of(props.corpusDir()));
+    }
+
+    /** What happened to one file. {@code NO_TEXT}: no extractable text, nothing was stored for it. */
+    public enum FileStatus { INGESTED, UNCHANGED, NO_TEXT }
+
+    public record FileOutcome(String docId, String fileName, FileStatus status, int pages, int chunks) {
+    }
+
+    /** Progress of one file: {@code parsing}, {@code chunking}, {@code embedding} (done/total chunks), {@code storing}. */
+    public record Progress(String stage, int done, int total) {
+    }
+
+    private record Stats(int pages, int chunks) {
+    }
+
+    /**
+     * Ingests one file with the same rules as {@link #run()}: skipped when its hash, embedding model and
+     * pipeline version are already stored, otherwise parsed, chunked and embedded completely before the
+     * stored chunks are replaced in one transaction (a failure leaves the previous version intact).
+     * This is what "add to knowledge base" uses, with {@code progress} for the UI.
+     */
+    public FileOutcome ingestFile(Path file, java.util.function.Consumer<Progress> progress) throws IOException {
+        SourceDocument doc = SourceDocument.read(file);
+        String tenant = app.tenantId();
+        if (isUpToDate(store.docStates(tenant).get(doc.docId()), doc)) {
+            return new FileOutcome(doc.docId(), doc.fileName(), FileStatus.UNCHANGED, 0, 0);
+        }
+        Stats stats = ingest(tenant, doc, progress == null ? p -> { } : progress, true);
+        return new FileOutcome(doc.docId(), doc.fileName(),
+                stats.chunks() > 0 ? FileStatus.INGESTED : FileStatus.NO_TEXT, stats.pages(), stats.chunks());
+    }
+
+    /**
+     * Parses and chunks a file without touching the store, so a caller can reject a document that would
+     * produce no chunks (a scan without a text layer) before anything is saved or replaced.
+     *
+     * @return the number of pages and chunks the file would produce
+     */
+    public int[] dryRun(Path file) throws IOException {
+        SourceDocument doc = SourceDocument.read(file);
+        List<PdfPage> pages = loader.loadPages(doc);
+        return new int[] {pages.size(), chunker.chunk(pages).size()};
+    }
+
+    /** The content hash currently stored for a document id, if any (used to detect a name collision). */
+    public java.util.Optional<Set<String>> storedHashes(String docId) {
+        ChunkStore.DocState state = store.docStates(app.tenantId()).get(docId);
+        return state == null ? java.util.Optional.empty() : java.util.Optional.of(state.contentHashes());
     }
 
     IngestionResult run(Path corpusDir) {
@@ -79,7 +128,7 @@ public class IngestionJob {
                     skipped.add(doc.docId());
                     continue;
                 }
-                if (ingest(tenant, doc)) {
+                if (ingest(tenant, doc, p -> { }, false).chunks() > 0) {
                     ingested.add(doc.docId());
                 } else {
                     empty.add(fileName);
@@ -108,18 +157,30 @@ public class IngestionJob {
         return result;
     }
 
-    /** @return false when the file has no extractable text (any stale chunks are removed). */
-    private boolean ingest(String tenant, SourceDocument doc) {
+    /** @return zero chunks when the file has no extractable text (any stale chunks are removed). */
+    private Stats ingest(String tenant, SourceDocument doc, java.util.function.Consumer<Progress> progress,
+                         boolean sliced) {
+        progress.accept(new Progress("parsing", 0, 1));
         List<PdfPage> pages = loader.loadPages(doc);
+        progress.accept(new Progress("chunking", 0, pages.size()));
         List<TextChunk> chunks = chunker.chunk(pages);
         if (chunks.isEmpty()) {
             log.warn("{} has no extractable text ({} pages); is it a scan? Nothing stored", doc.fileName(), pages.size());
             store.replaceDocument(tenant, doc.docId(), List.of());
-            return false;
+            return new Stats(pages.size(), 0);
         }
 
         List<String> texts = chunks.stream().map(TextChunk::text).toList();
-        List<float[]> vectors = embeddings.embedDocuments(titleFor(doc.fileName()), texts);
+        // the corpus job embeds in one call (the service batches inside); a single file is embedded in
+        // slices so the caller sees progress
+        int slice = sliced ? PROGRESS_SLICE : texts.size();
+        List<float[]> vectors = new ArrayList<>(texts.size());
+        progress.accept(new Progress("embedding", 0, texts.size()));
+        for (int from = 0; from < texts.size(); from += slice) {
+            vectors.addAll(embeddings.embedDocuments(titleFor(doc.fileName()),
+                    texts.subList(from, Math.min(from + slice, texts.size()))));
+            progress.accept(new Progress("embedding", vectors.size(), texts.size()));
+        }
 
         List<StoredChunk> toStore = new ArrayList<>(chunks.size());
         for (int i = 0; i < chunks.size(); i++) {
@@ -127,9 +188,10 @@ public class IngestionJob {
             toStore.add(new StoredChunk(tenant, doc.docId(), c.index(), doc.fileName(), c.page(), c.text(),
                     doc.contentHash(), embeddings.modelName(), vectors.get(i), props.pipelineVersion()));
         }
+        progress.accept(new Progress("storing", 0, toStore.size()));
         store.replaceDocument(tenant, doc.docId(), toStore);
         log.info("Ingested {}: {} pages, {} chunks", doc.fileName(), pages.size(), toStore.size());
-        return true;
+        return new Stats(pages.size(), toStore.size());
     }
 
     private boolean isUpToDate(ChunkStore.DocState state, SourceDocument doc) {
