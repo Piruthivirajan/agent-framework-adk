@@ -49,6 +49,7 @@
 <header>
   <h1>MCP servers</h1>
   <a href="/" style="color:var(--accent)">Back to chat</a>
+  <button id="signout" type="button" hidden>Sign out</button>
 </header>
 <main>
   <div class="card">
@@ -90,6 +91,28 @@
 <script>
 (function () {
   'use strict';
+
+  // a signed-out (or expired) session sends the user to the login page instead of showing an error
+  var realFetch = window.fetch;
+  window.fetch = function () {
+    return realFetch.apply(this, arguments).then(function (res) {
+      if (res.status === 401) { window.location.href = '/login.html'; }
+      return res;
+    });
+  };
+  function setupSignOut() {
+    realFetch('/api/me').then(function (r) { return r.json(); }).then(function (m) {
+      var b = document.getElementById('signout');
+      if (b && m.authRequired && m.authenticated) {
+        b.hidden = false;
+        b.addEventListener('click', function () {
+          realFetch('/api/logout', { method: 'POST' }).then(function () { window.location.href = '/login.html'; });
+        });
+      }
+    }).catch(function () { /* a convenience */ });
+  }
+  setupSignOut();
+
   var $ = function (id) { return document.getElementById(id); };
 
   function el(tag, props, children) {

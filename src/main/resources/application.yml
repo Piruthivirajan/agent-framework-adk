@@ -1,3 +1,12 @@
+server:
+  servlet:
+    session:
+      cookie:
+        http-only: true
+        same-site: lax          # no cross-site form post can ride on the session
+        # secure: true          # set when the application is served over https (behind a TLS proxy)
+      timeout: 8h
+
 spring:
   application:
     name: agent-framework
@@ -52,6 +61,12 @@ agentfw:
     rewrite-follow-ups: false    # a separate rewrite call (+2.5 to 4.5 s per turn); the coordinator now restates follow-ups itself
     history-turns: 4
     max-sessions: 500
+  auth:
+    # The demo login. Empty = the application is open (fine on a laptop, not on a reachable host).
+    password: ${AGENTFW_DEMO_PASSWORD:}
+    max-failures: 5              # wrong passwords per client address ...
+    lock-seconds: 300            # ... within this window, then the login is refused for the rest of it
+    session-hours: 8
   rag:
     max-searches: 2              # enforced in the search tool, not only in the prompt (docs/e2e/findings.md, section 7)
     stop-after-floor-miss: true  # a first search below the floor ends the turn: rewriting did not rescue any question

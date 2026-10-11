@@ -103,7 +103,7 @@ Decisions (user): file agent shape decided by the step 0 spike; **two paths** to
 - [x] 2. MCP answer path: `mcp_agent`, "RAG not found then MCP" in code, which server and tool answered, raw tool result in the trace
 - [x] 3. Clear messages: wrong URL, wrong token, server down, tool error, Gemini timeout and rate limit
 - [x] 4. Demo MCP server (`src/test/java/com/demo/agentfw/mcp/DemoMcpServer.java`) and instructions
-- [ ] 5. Demo login (one password from the environment) protecting the whole app
+- [x] 5. Demo login (one password from the environment) protecting the whole app
 
 ## Watch list
 
@@ -112,6 +112,18 @@ Decisions (user): file agent shape decided by the step 0 spike; **two paths** to
 ## Log
 
 <!-- Newest first. One entry per task: date, what was built, what was verified. -->
+
+### 2026-10-11: Day 6 step 5, demo login; and a dead-page bug caught by the browser check
+- **Login (`com.demo.agentfw.auth`):** one shared password from `AGENTFW_DEMO_PASSWORD` (`agentfw.auth.password`). Empty means open, with a startup WARN ("open to anyone who can reach it"); set, **the whole application is behind it**: an API call without a session gets `401 LOGIN_REQUIRED` JSON, a page is redirected to `/login.html`; only the login page, `POST /api/login`, `GET /api/me` and `/actuator/health` (for Docker and load balancer probes) are open. Pages that receive a 401 (an expired session) send the user to the login page; a "Sign out" button appears when a password is set.
+- **Hardening that fits a shared demo password:** comparison in constant time on SHA-256 digests; a counted failure per client address, then refusal for the rest of a 5-minute window after 5 failures (429, "try again in N minute(s)", the right password is refused too while locked); a fresh session id at sign-in (no fixation); cookie `HttpOnly`, `SameSite=Lax`, 8 h; the password is never logged or echoed and `AuthProperties.toString()` hides it. Not covered, and said so: one role, no per-user identity; the client address is `getRemoteAddr()` (behind a proxy every client looks the same until forwarded headers are trusted); `Secure` cookie must be switched on when serving over https.
+- **Verified live (password from the environment):** `/` redirects to the login page, `/api/mcp/servers` is 401, health and the login page are open, a wrong password is refused with the sentence, the right one sets `JSESSIONID; HttpOnly; SameSite=Lax`, the password does not appear in the log (0 matches) and the failed attempt is logged by address only; signed in in the browser pane, Sign out is visible, the knowledge base list and an MCP tool answer with its raw result in the trace work.
+- **Bug found by that browser check and fixed:** a script edit (MCP raw result in the trace panel) had put a raw newline into a JavaScript string, so `index.html` failed to parse and the page was silently dead after login (no list, no buttons). Java tests could not see it. Fixed, and a new test (`PageScriptSyntaxTest`) runs `node --check` on the script of every page when Node.js is available (skipped otherwise); the existing guard also covers `mcp.html` and `login.html`.
+- Verified: BUILD SUCCESS, 334 tests.
+
+### 2026-10-11: Day 6 finished
+- Priorities 1 to 5 done in order (settings page and registry, MCP answer path with "RAG not found then MCP" in code, clear messages, demo server with instructions, demo login); the follow-up rewrite was folded into the coordinator first (10 of 10 on the live routing check).
+- **For the demo and README:** scenario D needs the demo server (`docs/DEMO_MCP.md`), the app, a Gemini key and `AGENTFW_DEMO_PASSWORD`. Known limits to state: MCP configuration is in memory (lost on restart), no stdio, no SSRF protection beyond http/https, tool answers are written by the model from the tool result and are not verified (the raw result is shown beside them), SSE through a proxy needs response buffering off.
+- Not measured: a model rate-limit or timeout live (the mapping is unit-tested with the provider's typical texts, not provoked), and the MCP agent with more than the three demo tools.
 
 ### 2026-10-11: Day 6 step 4, demo MCP server and instructions (`docs/DEMO_MCP.md`)
 - `DemoMcpServer` (one Java file, JDK only, runs with `java src/test/java/com/demo/agentfw/mcp/DemoMcpServer.java --port 8099 --token demo-secret`): Streamable HTTP at `/mcp` and legacy SSE at `/sse`, bearer token on both (401 otherwise), tools `lookup_order`, `oncall_engineer` and `billing_report` (always fails, to show tool errors), invented data. The same class is the in-process server of the registry and answer-path tests.
