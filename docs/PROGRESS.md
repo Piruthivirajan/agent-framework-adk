@@ -60,6 +60,7 @@ Decisions: `gemini-3.8-flash` for both agents, configurable by name, low thinkin
 - [x] 4. `ChatService` with scripted-model scenario A and B tests
 - [x] 5. Live scenarios A and B; thinking-budget measurement
 - [x] 6. 48-question end-to-end run, `docs/END_TO_END.md`
+- [x] 7. Latency step (timeboxed): search cap in code, early stop, query cache (dropped), 4 adversarial questions; findings section 7 in `docs/e2e/findings.md`
 
 **Day 6 note (user):** the "final answer comes from the verified `rag_agent` result, coordinator prose ignored, no tool called gives the fixed reply" rule applies to **RAG answers only**. MCP tool answers will need their own path (the coordinator calls MCP tools directly, so its prose is the answer there); do not apply the RAG verifier to them.
 
@@ -81,6 +82,15 @@ Retrieval gate (done, Day 3): a low **floor** at -6.5 removes only clear junk; 3
 ## Log
 
 <!-- Newest first. One entry per task: date, what was built, what was verified. -->
+
+### 2026-10-11: Day 4 latency step (levers, same 48 questions, adversarial set)
+- **Result, same-hour before vs after** (`lat-b3-repeat` vs `lat-r3-final`): median **12.7 s to 9.1 s**, p90 **19.3 s to 13.4 s**, mean 13.4 to 9.8 s, searches per question 1.83 to 1.19. Per type, median: IN_CORPUS 11.4 to 9.1 s, OUT_FAR 13.5 to 7.6 s (1.0 search), OUT_NEAR 19.3 to 9.3 s, OUT_AWS 18.1 to 10.6 s. Quality is within run-to-run variation (the unchanged config scored 28 correct, then 26; the final run 28), 0 out-of-corpus answers throughout.
+- **Measurement lesson:** model speed drifts by about 2 s between runs, as large as the cap's own saving, so lever 2 alone looked slower in a single run (14.5 s vs 12.7 s median). The "before" is therefore a repeat of the unchanged configuration in the same hour, and the cap's effect is estimated by pairing each question with itself (about 3.5 to 4.2 s saved per question that loses its third search).
+- **Lever 1** (5 chunks, not 12): already the case in every passing search; no change. **Lever 2** (`agentfw.rag.max-searches`, default now 2): enforced in `SearchDocumentsTool` per requestId, returns `SEARCH_LIMIT_REACHED` without retrieving; never fired live (the model obeys the instruction), unit-tested. **Lever 3** (`agentfw.rag.stop-after-floor-miss`, default now true): in 128 in-corpus question-runs only in-31 (a paraphrase) had a below-floor first search and was never answered in 4 runs; caveat: one question of evidence. **Lever 4** (query embedding cache): 0 hits in 57 embeddings, removed.
+- **Adversarial questions** (`eval/adversarial-questions.json`, own file so the floor calibration is untouched; `agentfw.e2e.set=adversarial|all`): 4 questions whose numbers are absent from the PDFs while their topics are present (3 of 4 had top rerank scores 3.5 to 6.5, above the 3.3 high-confidence marker, so the floor cannot stop them). **Verifier caught 0 of 12 with the production prompt (the model refused itself 12 of 12) and 1 of 12 with a deliberately permissive suffix** (`256 KB` quoted from an unrelated SQS chunk, rejected by the numeric rule); no wrong answer was shown. The agent logs `instruction suffix ACTIVE` so a stress run can be checked.
+- **Correction to the earlier entry:** the verifier-caused false "not found" was 0 of 32 in the first two runs but 0, 2, 2 of 32 in the later three (4 cases: 2 malformed JSON from the model, `"ref":"r1c3,quote":"..."`, and 2 numeric-rule hits on "EC2" / "Route 53" not repeated in the quote). Not changed in this step; options are one retry with the verifier's error, or dropping only the offending claim (changes the rule). User decision needed.
+- Also: `RagProperties` (`agentfw.rag.*`, including an experiment-only `instruction-suffix`, empty in production). `docs/END_TO_END.md` now renders `lat-r3-final`; saved runs in `docs/e2e/` (`lat-*`, `adv-*`).
+- Verified: BUILD SUCCESS, 191 tests.
 
 ### 2026-10-11: Day 4 finished, end-to-end results (`docs/END_TO_END.md`)
 - **48 questions through the real coordinator, RAG agent, retrieval and verifier** (`gemini-3.8-flash`, coordinator budget 128, agent budget 0, floor -6.5, rerank depth 12): in-corpus **28 of 32 answered with an acceptable page** (25 on strict pages), 2 "false answers" by the page rule, 2 false "not found"; **out-of-corpus 16 of 16 correctly not answered** (6 unrelated, 6 near-domain, 4 AWS limits and prices). The same run with the agent's default thinking budget: 27 correct (24 strict), 2 false answers, 3 false "not found", 16 of 16 out-of-corpus.

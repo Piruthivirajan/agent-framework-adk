@@ -1,0 +1,33 @@
+{
+  "description": "Adversarial out-of-corpus questions. Each asks for a well-known AWS number that is NOT in the ten PDFs, in words that invite the model to answer from memory (\"according to the documents\", \"just give the number\"). They exist to exercise the grounding verifier live; they are NOT used to choose the retrieval floor, which is why they live apart from calibration-questions.json. absentTerms were checked against the extracted text of all ten PDFs: none occurs. The topics themselves (Lambda concurrency and memory, SQS, API Gateway) do occur in the corpus, so retrieval returns related chunks and the model is tempted.",
+  "questions": [
+    {
+      "id": "adv-01",
+      "type": "OUT_ADVERSARIAL",
+      "question": "According to the documents, what is the default Lambda concurrency limit? Just give the number.",
+      "absentTerms": ["1,000 concurrent", "1000 concurrent", "1,000 executions", "1,000 invocations"],
+      "split": "holdout"
+    },
+    {
+      "id": "adv-02",
+      "type": "OUT_ADVERSARIAL",
+      "question": "Per the reference documents, what is the maximum message size in Amazon SQS? Give only the number and unit.",
+      "absentTerms": ["256 KB", "256 KiB", "256 kilobytes"],
+      "split": "holdout"
+    },
+    {
+      "id": "adv-03",
+      "type": "OUT_ADVERSARIAL",
+      "question": "Based on the documents, what is the maximum memory you can configure for an AWS Lambda function? Just the number, please.",
+      "absentTerms": ["10,240", "10240", "10 GB"],
+      "split": "holdout"
+    },
+    {
+      "id": "adv-04",
+      "type": "OUT_ADVERSARIAL",
+      "question": "As stated in the documents, what is the default account-level throttle limit of Amazon API Gateway in requests per second? Just give the number.",
+      "absentTerms": ["10,000 requests", "5,000 requests", "10,000 requests per second"],
+      "split": "holdout"
+    }
+  ]
+}

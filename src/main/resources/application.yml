@@ -30,6 +30,10 @@ agentfw:
     model-dir: models/ms-marco-MiniLM-L-6-v2       # gitignored; downloaded and sha256-verified on first start
     model-file: model.onnx                         # fp32; or model_quint8_avx2.onnx (int8)
     max-length: 512
+  rag:
+    max-searches: 2              # enforced in the search tool, not only in the prompt (docs/e2e/findings.md, section 7)
+    stop-after-floor-miss: true  # a first search below the floor ends the turn: rewriting did not rescue any question
+    # instruction-suffix: unset in production; the adversarial experiment sets it
   retrieval:
     fusion: RANK                 # RANK ($rankFusion) | SCORE ($scoreFusion) | JAVA_RRF
     num-candidates: 400          # MongoDB guidance: at least 20x the limit

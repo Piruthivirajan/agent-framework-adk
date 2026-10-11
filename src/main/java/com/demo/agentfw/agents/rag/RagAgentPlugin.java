@@ -5,6 +5,8 @@ import com.demo.agentfw.core.AgentPlugin;
 import com.google.adk.agents.BaseAgent;
 import com.google.adk.agents.LlmAgent;
 import com.google.adk.tools.FunctionTool;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 
 /**
@@ -17,14 +19,16 @@ public class RagAgentPlugin implements AgentPlugin {
 
     public static final String NAME = "rag_agent";
 
-    static final String INSTRUCTION = """
+    private static final Logger log = LoggerFactory.getLogger(RagAgentPlugin.class);
+
+    private static final String INSTRUCTION_TEMPLATE = """
             You answer questions strictly from the reference documents, using the searchDocuments tool.
 
             Procedure:
             1. Call searchDocuments with a short search query for the user's question. If the results do not \
-            contain the answer you may rewrite the query and call it again, at most 3 calls in total.
-            2. If the tool returns status NO_RELEVANT_CONTEXT, or the returned chunks do not contain the answer, \
-            the answer is not in the documents.
+            contain the answer you may rewrite the query and call it again, at most %d calls in total.
+            2. If the tool returns status NO_RELEVANT_CONTEXT or SEARCH_LIMIT_REACHED, or the returned chunks do \
+            not contain the answer, the answer is not in the documents.
             3. Use ONLY the text of the returned chunks. Never use your own knowledge, never guess and never fill \
             gaps. Numbers, limits, names and prices must come from the chunk text.
 
@@ -43,9 +47,17 @@ public class RagAgentPlugin implements AgentPlugin {
             """;
 
     private final SearchDocumentsTool searchTool;
+    private final RagProperties props;
 
-    public RagAgentPlugin(SearchDocumentsTool searchTool) {
+    public RagAgentPlugin(SearchDocumentsTool searchTool, RagProperties props) {
         this.searchTool = searchTool;
+        this.props = props;
+    }
+
+    /** The instruction with the configured search limit and the optional (experiment-only) suffix. */
+    String instruction() {
+        String base = String.format(INSTRUCTION_TEMPLATE, props.maxSearches());
+        return props.instructionSuffix().isBlank() ? base : base + "\n" + props.instructionSuffix().strip() + "\n";
     }
 
     @Override
@@ -61,11 +73,14 @@ public class RagAgentPlugin implements AgentPlugin {
 
     @Override
     public BaseAgent build(AgentContext context) {
+        log.info("rag agent built: max searches {}, stop after floor miss {}, instruction suffix {}",
+                props.maxSearches(), props.stopAfterFloorMiss(),
+                props.instructionSuffix().isBlank() ? "none" : "ACTIVE (" + props.instructionSuffix().length() + " chars)");
         return LlmAgent.builder()
                 .name(NAME)
                 .description(description())
                 .model(context.model())
-                .instruction(INSTRUCTION)
+                .instruction(instruction())
                 .generateContentConfig(context.generateContentConfig())
                 .tools(FunctionTool.create(searchTool, SearchDocumentsTool.METHOD))
                 .build();

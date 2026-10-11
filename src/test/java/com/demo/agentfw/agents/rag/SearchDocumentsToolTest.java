@@ -16,7 +16,8 @@ class SearchDocumentsToolTest {
         RetrievalLedger ledger = new RetrievalLedger();
         List<String> queries = new ArrayList<>();
         SearchDocumentsTool tool = new SearchDocumentsTool(
-                TestRetrieval.service(TestRetrieval.sampleCandidates(), i -> 5.0 - i, queries::add), ledger);
+                TestRetrieval.service(TestRetrieval.sampleCandidates(), i -> 5.0 - i, queries::add), ledger,
+                RagProperties.defaults());
 
         Map<String, Object> out = tool.search("req-1", "Well-Architected Tool");
 
@@ -38,12 +39,14 @@ class SearchDocumentsToolTest {
     void answersNoRelevantContextWhenRetrievalIsBelowTheFloor() {
         RetrievalLedger ledger = new RetrievalLedger();
         SearchDocumentsTool tool = new SearchDocumentsTool(
-                TestRetrieval.service(TestRetrieval.sampleCandidates(), i -> -9.0, null), ledger);
+                TestRetrieval.service(TestRetrieval.sampleCandidates(), i -> -9.0, null), ledger,
+                RagProperties.defaults());
 
         Map<String, Object> out = tool.search("req-1", "who won the world cup");
 
-        assertThat(out).containsOnlyKeys("status");
+        assertThat(out).containsOnlyKeys("status", "message");   // the message is the early-stop hint
         assertThat(out.get("status")).isEqualTo("NO_RELEVANT_CONTEXT");
+        assertThat(out.get("message").toString()).doesNotContain("score");
         assertThat(ledger.retrievals("req-1")).hasSize(1);   // still recorded, for the trace
         assertThat(ledger.retrievals("req-1").get(0).trace()).isNotNull();
     }
@@ -52,7 +55,8 @@ class SearchDocumentsToolTest {
     void everyCallIsRecordedUnderItsRequestSoRewrittenQueriesAreAllVerifiable() {
         RetrievalLedger ledger = new RetrievalLedger();
         SearchDocumentsTool tool = new SearchDocumentsTool(
-                TestRetrieval.service(TestRetrieval.sampleCandidates(), i -> 5.0 - i, null), ledger);
+                TestRetrieval.service(TestRetrieval.sampleCandidates(), i -> 5.0 - i, null), ledger,
+                RagProperties.defaults());
 
         tool.search("req-1", "first wording");
         tool.search("req-1", "second wording");
@@ -62,5 +66,81 @@ class SearchDocumentsToolTest {
                 .containsExactly("first wording", "second wording");
         assertThat(ledger.chunk("req-1", "r2c1")).isPresent();
         assertThat(ledger.retrievals("req-2")).hasSize(1);
+    }
+
+    @Test
+    void thirdSearchIsRefusedWithoutRetrievingWhenTheCapIsTwo() {
+        RetrievalLedger ledger = new RetrievalLedger();
+        List<String> queries = new ArrayList<>();
+        SearchDocumentsTool tool = new SearchDocumentsTool(
+                TestRetrieval.service(TestRetrieval.sampleCandidates(), i -> 5.0 - i, queries::add), ledger,
+                new RagProperties(2, false, ""));
+
+        tool.search("req-1", "one");
+        tool.search("req-1", "two");
+        Map<String, Object> refused = tool.search("req-1", "three");
+
+        assertThat(refused.get("status")).isEqualTo("SEARCH_LIMIT_REACHED");
+        assertThat(refused.get("message").toString()).contains("NOT_FOUND");
+        assertThat(refused).doesNotContainKey("chunks");
+        assertThat(queries).containsExactly("one", "two");          // no retrieval ran for the third call
+        assertThat(ledger.retrievals("req-1")).hasSize(2);          // and nothing was recorded for it
+    }
+
+    @Test
+    void theCapIsPerRequestNotGlobal() {
+        RetrievalLedger ledger = new RetrievalLedger();
+        SearchDocumentsTool tool = new SearchDocumentsTool(
+                TestRetrieval.service(TestRetrieval.sampleCandidates(), i -> 5.0 - i, null), ledger,
+                new RagProperties(1, false, ""));
+
+        tool.search("req-1", "one");
+
+        assertThat(tool.search("req-1", "again").get("status")).isEqualTo("SEARCH_LIMIT_REACHED");
+        assertThat(tool.search("req-2", "other request").get("status")).isEqualTo("OK");
+    }
+
+    @Test
+    void earlyStopRefusesFurtherSearchesAfterAFirstSearchBelowTheFloor() {
+        RetrievalLedger ledger = new RetrievalLedger();
+        List<String> queries = new ArrayList<>();
+        SearchDocumentsTool tool = new SearchDocumentsTool(
+                TestRetrieval.service(TestRetrieval.sampleCandidates(), i -> -9.0, queries::add), ledger,
+                new RagProperties(3, true, ""));
+
+        Map<String, Object> first = tool.search("req-1", "who won the world cup");
+        Map<String, Object> second = tool.search("req-1", "world cup winner");
+
+        assertThat(first.get("status")).isEqualTo("NO_RELEVANT_CONTEXT");
+        assertThat(first.get("message").toString()).contains("Do not search again");
+        assertThat(second.get("status")).isEqualTo("NO_RELEVANT_CONTEXT");
+        assertThat(queries).containsExactly("who won the world cup");   // the rewrite never ran
+    }
+
+    @Test
+    void earlyStopDoesNotApplyWhenTheFirstSearchPassedTheFloor() {
+        RetrievalLedger ledger = new RetrievalLedger();
+        SearchDocumentsTool tool = new SearchDocumentsTool(
+                TestRetrieval.service(TestRetrieval.sampleCandidates(), i -> 5.0 - i, null), ledger,
+                new RagProperties(3, true, ""));
+
+        tool.search("req-1", "one");
+
+        assertThat(tool.search("req-1", "two").get("status")).isEqualTo("OK");
+    }
+
+    @Test
+    void withTheFlagOffABelowFloorFirstSearchStillAllowsARewrite() {
+        RetrievalLedger ledger = new RetrievalLedger();
+        List<String> queries = new ArrayList<>();
+        SearchDocumentsTool tool = new SearchDocumentsTool(
+                TestRetrieval.service(TestRetrieval.sampleCandidates(), i -> -9.0, queries::add), ledger,
+                new RagProperties(2, false, ""));
+
+        Map<String, Object> first = tool.search("req-1", "one");
+        tool.search("req-1", "two");
+
+        assertThat(first).containsOnlyKeys("status");               // no stop message when the flag is off
+        assertThat(queries).containsExactly("one", "two");
     }
 }

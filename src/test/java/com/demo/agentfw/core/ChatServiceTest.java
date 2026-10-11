@@ -2,6 +2,7 @@ package com.demo.agentfw.core;
 
 import com.demo.agentfw.agents.rag.GroundingVerifier;
 import com.demo.agentfw.agents.rag.RagAgentPlugin;
+import com.demo.agentfw.agents.rag.RagProperties;
 import com.demo.agentfw.agents.rag.RetrievalLedger;
 import com.demo.agentfw.agents.rag.SearchDocumentsTool;
 import com.demo.agentfw.agents.rag.TestRetrieval;
@@ -40,8 +41,9 @@ class ChatServiceTest {
 
         Rig(DoubleUnaryOperator score, boolean ragIsFinalAnswer) {
             SearchDocumentsTool tool = new SearchDocumentsTool(
-                    TestRetrieval.service(TestRetrieval.sampleCandidates(), i -> score.applyAsDouble(i), null), ledger);
-            RagAgentPlugin plugin = new RagAgentPlugin(tool) {
+                    TestRetrieval.service(TestRetrieval.sampleCandidates(), i -> score.applyAsDouble(i), null), ledger,
+                    RagProperties.defaults());
+            RagAgentPlugin plugin = new RagAgentPlugin(tool, RagProperties.defaults()) {
                 @Override
                 public boolean finalAnswer() {
                     return ragIsFinalAnswer;
@@ -200,7 +202,8 @@ class ChatServiceTest {
         ScriptedLlm llm = new ScriptedLlm();
         RetrievalLedger ledger = new RetrievalLedger();
         RagAgentPlugin rag = new RagAgentPlugin(new SearchDocumentsTool(
-                TestRetrieval.service(TestRetrieval.sampleCandidates(), i -> 5.0 - i, null), ledger));
+                TestRetrieval.service(TestRetrieval.sampleCandidates(), i -> 5.0 - i, null), ledger,
+                RagProperties.defaults()), RagProperties.defaults());
         ModelFactory factory = new ModelFactory() {
             @Override
             public BaseLlm create() {

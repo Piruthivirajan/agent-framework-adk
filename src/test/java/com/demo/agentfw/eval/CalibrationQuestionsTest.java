@@ -42,6 +42,23 @@ class CalibrationQuestionsTest {
     }
 
     @Test
+    void theAdversarialSetIsSeparateFromTheCalibrationSetAndAllOutOfCorpus() {
+        List<CalibrationQuestion> adversarial = CalibrationQuestions.loadAdversarial();
+        Set<String> calibrationIds = new HashSet<>();
+        CalibrationQuestions.load().forEach(q -> calibrationIds.add(q.id()));
+
+        assertThat(adversarial).hasSize(4);
+        for (CalibrationQuestion q : adversarial) {
+            assertThat(q.type()).isEqualTo("OUT_ADVERSARIAL");
+            assertThat(q.inCorpus()).isFalse();
+            assertThat(calibrationIds).doesNotContain(q.id());
+            assertThat(q.question()).containsIgnoringCase("documents");   // the temptation is in the wording
+            assertThat(q.expected() == null || q.expected().isEmpty()).isTrue();
+        }
+        assertThat(adversarial.get(0).question()).contains("default Lambda concurrency limit");
+    }
+
+    @Test
     void everyTypeHasAHoldoutSoTheThresholdCanBeChecked() {
         List<CalibrationQuestion> all = CalibrationQuestions.load();
         for (String type : List.of("IN_CORPUS", "OUT_FAR", "OUT_NEAR", "OUT_AWS")) {

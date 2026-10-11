@@ -50,6 +50,7 @@ public class EndToEndRunner implements ApplicationRunner {
     private final int retries;
     private final String output;
     private final boolean renderOnly;
+    private final String set;
 
     public EndToEndRunner(ChatService chat, LlmProperties llm,
                           @Value("${agentfw.e2e.label:run}") String label,
@@ -57,7 +58,9 @@ public class EndToEndRunner implements ApplicationRunner {
                           @Value("${agentfw.e2e.dir:docs/e2e}") String dir,
                           @Value("${agentfw.e2e.retries:2}") int retries,
                           @Value("${agentfw.e2e.output:}") String output,
-                          @Value("${agentfw.e2e.render-only:false}") boolean renderOnly) {
+                          @Value("${agentfw.e2e.render-only:false}") boolean renderOnly,
+                          @Value("${agentfw.e2e.set:calibration}") String set) {
+        this.set = set;
         this.chat = chat;
         this.llm = llm;
         this.label = label;
@@ -99,7 +102,7 @@ public class EndToEndRunner implements ApplicationRunner {
     private E2eRun execute() {
         Set<String> wanted = ids.isBlank() ? Set.of()
                 : Arrays.stream(ids.split(",")).map(String::strip).collect(Collectors.toSet());
-        List<CalibrationQuestion> questions = CalibrationQuestions.load().stream()
+        List<CalibrationQuestion> questions = questionSet().stream()
                 .filter(q -> wanted.isEmpty() || wanted.contains(q.id())).toList();
         log.info("End-to-end '{}': {} questions, model {}, coordinator thinking budget {}", label, questions.size(),
                 llm.model(), llm.coordinatorThinkingBudget());
@@ -114,6 +117,21 @@ public class EndToEndRunner implements ApplicationRunner {
         }
         return new E2eRun(label, llm.model(), llm.coordinatorThinkingBudget(), llm.agentThinkingBudget(),
                 Instant.now().toString(), outcomes);
+    }
+
+    /** {@code calibration} (the 48 questions, default), {@code adversarial} (the 4 memory-tempting ones) or {@code all}. */
+    private List<CalibrationQuestion> questionSet() {
+        return switch (set) {
+            case "calibration" -> CalibrationQuestions.load();
+            case "adversarial" -> CalibrationQuestions.loadAdversarial();
+            case "all" -> {
+                List<CalibrationQuestion> all = new ArrayList<>(CalibrationQuestions.load());
+                all.addAll(CalibrationQuestions.loadAdversarial());
+                yield all;
+            }
+            default -> throw new IllegalArgumentException(
+                    "agentfw.e2e.set must be calibration, adversarial or all, not '" + set + "'");
+        };
     }
 
     private E2eOutcome ask(CalibrationQuestion q) {

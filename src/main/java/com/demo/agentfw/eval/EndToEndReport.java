@@ -13,7 +13,8 @@ import java.util.stream.Collectors;
  */
 public final class EndToEndReport {
 
-    static final List<String> TYPES = List.of("IN_CORPUS", "OUT_FAR", "OUT_NEAR", "OUT_AWS");
+    static final List<String> TYPES = List.of("IN_CORPUS", "OUT_FAR", "OUT_NEAR", "OUT_AWS",
+            "OUT_ADVERSARIAL");
 
     private EndToEndReport() {
     }

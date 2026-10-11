@@ -28,9 +28,13 @@ class RagAgentPluginTest {
     private final RetrievalLedger ledger = new RetrievalLedger();
 
     private BaseAgent agent(ScriptedLlm llm, double scoreOfFirst) {
+        return agent(llm, scoreOfFirst, RagProperties.defaults());
+    }
+
+    private BaseAgent agent(ScriptedLlm llm, double scoreOfFirst, RagProperties props) {
         SearchDocumentsTool tool = new SearchDocumentsTool(
-                TestRetrieval.service(TestRetrieval.sampleCandidates(), i -> scoreOfFirst - i, null), ledger);
-        return new RagAgentPlugin(tool).build(new AgentContext(llm, GenerateContentConfig.builder().build()));
+                TestRetrieval.service(TestRetrieval.sampleCandidates(), i -> scoreOfFirst - i, null), ledger, props);
+        return new RagAgentPlugin(tool, props).build(new AgentContext(llm, GenerateContentConfig.builder().build()));
     }
 
     private static List<Event> run(BaseAgent agent, String requestId) {
@@ -99,7 +103,7 @@ class RagAgentPluginTest {
 
         String instruction = String.join("\n", llm.requests().get(0).getSystemInstructions());
         assertThat(instruction)
-                .contains("at most 3 calls")
+                .contains("at most 2 calls")
                 .contains("ONLY the text of the returned chunks")
                 .contains("{\"status\":\"NOT_FOUND\"}")
                 .contains("\"quote\"")
@@ -108,9 +112,35 @@ class RagAgentPluginTest {
     }
 
     @Test
+    void theSearchLimitInTheInstructionIsTheConfiguredOne() {
+        ScriptedLlm llm = searchThenAnswer(ANSWER);
+
+        run(agent(llm, 5.0, new RagProperties(4, false, "")), "req-1");
+
+        String instruction = String.join("\n", llm.requests().get(0).getSystemInstructions());
+        assertThat(instruction).contains("at most 4 calls").doesNotContain("at most 2 calls")
+                .contains("SEARCH_LIMIT_REACHED");
+    }
+
+    @Test
+    void theInstructionSuffixIsAppendedOnlyWhenConfigured() {
+        ScriptedLlm plain = searchThenAnswer(ANSWER);
+        ScriptedLlm suffixed = searchThenAnswer(ANSWER);
+
+        run(agent(plain, 5.0), "req-1");
+        run(agent(suffixed, 5.0, new RagProperties(2, true, "EXPERIMENT SUFFIX")), "req-2");
+
+        assertThat(String.join("\n", plain.requests().get(0).getSystemInstructions()))
+                .doesNotContain("EXPERIMENT SUFFIX");
+        assertThat(String.join("\n", suffixed.requests().get(0).getSystemInstructions()))
+                .contains("EXPERIMENT SUFFIX");
+    }
+
+    @Test
     void theAgentIsRegisteredUnderTheNameTheCoordinatorUses() {
         RagAgentPlugin plugin = new RagAgentPlugin(new SearchDocumentsTool(
-                TestRetrieval.service(TestRetrieval.sampleCandidates(), i -> 1.0, null), ledger));
+                TestRetrieval.service(TestRetrieval.sampleCandidates(), i -> 1.0, null), ledger,
+                RagProperties.defaults()), RagProperties.defaults());
 
         assertThat(plugin.name()).isEqualTo("rag_agent");
         assertThat(plugin.finalAnswer()).isTrue();

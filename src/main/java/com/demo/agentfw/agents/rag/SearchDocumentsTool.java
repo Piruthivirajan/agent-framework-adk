@@ -32,10 +32,12 @@ public class SearchDocumentsTool {
 
     private final RetrievalService retrieval;
     private final RetrievalLedger ledger;
+    private final RagProperties props;
 
-    public SearchDocumentsTool(RetrievalService retrieval, RetrievalLedger ledger) {
+    public SearchDocumentsTool(RetrievalService retrieval, RetrievalLedger ledger, RagProperties props) {
         this.retrieval = retrieval;
         this.ledger = ledger;
+        this.props = props;
     }
 
     @Annotations.Schema(name = METHOD, description = "Searches the reference documents and returns the most "
@@ -51,6 +53,18 @@ public class SearchDocumentsTool {
 
     /** The tool's logic without the framework context, so it can be tested directly. */
     Map<String, Object> search(String requestId, String query) {
+        List<RetrievalLedger.Retrieval> prior = ledger.retrievals(requestId);
+        if (prior.size() >= props.maxSearches()) {
+            log.info("search_documents request={} refused: search limit {} reached", requestId, props.maxSearches());
+            return refusal("SEARCH_LIMIT_REACHED", "The search limit for this question was reached. Do not search "
+                    + "again: answer from the chunks already returned, or reply {\"status\":\"NOT_FOUND\"}.");
+        }
+        if (props.stopAfterFloorMiss() && !prior.isEmpty()
+                && prior.get(0).decision() == GroundingDecision.NO_RELEVANT_CONTEXT) {
+            log.info("search_documents request={} refused: the first search found nothing relevant", requestId);
+            return refusal("NO_RELEVANT_CONTEXT", "The first search found nothing relevant in the documents. "
+                    + "Do not search again: reply {\"status\":\"NOT_FOUND\"}.");
+        }
         RetrievalResult result = retrieval.retrieve(query);
         RetrievalLedger.Retrieval recorded = ledger.register(requestId, query, result);
         log.info("search_documents request={} retrieval={} decision={} chunks={}", requestId, recorded.id(),
@@ -59,6 +73,10 @@ public class SearchDocumentsTool {
         Map<String, Object> out = new LinkedHashMap<>();
         if (result.decision() == GroundingDecision.NO_RELEVANT_CONTEXT || recorded.chunks().isEmpty()) {
             out.put("status", "NO_RELEVANT_CONTEXT");
+            if (props.stopAfterFloorMiss() && prior.isEmpty()) {
+                out.put("message", "Nothing relevant was found in the documents. Do not search again: "
+                        + "reply {\"status\":\"NOT_FOUND\"}.");
+            }
             return out;
         }
         List<Map<String, Object>> chunks = new ArrayList<>();
@@ -72,6 +90,13 @@ public class SearchDocumentsTool {
         }
         out.put("status", "OK");
         out.put("chunks", chunks);
+        return out;
+    }
+
+    private static Map<String, Object> refusal(String status, String message) {
+        Map<String, Object> out = new LinkedHashMap<>();
+        out.put("status", status);
+        out.put("message", message);
         return out;
     }
 }
