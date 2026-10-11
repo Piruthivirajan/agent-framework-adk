@@ -2,6 +2,9 @@ package com.demo.agentfw.core;
 
 import com.demo.agentfw.agents.file.FileAgentPlugin;
 import com.demo.agentfw.agents.file.FileSummaryLedger;
+import com.demo.agentfw.agents.mcp.McpAgentPlugin;
+import com.demo.agentfw.mcp.McpCallLedger;
+import com.demo.agentfw.mcp.McpRegistry;
 import com.demo.agentfw.agents.rag.GroundingVerifier;
 import com.demo.agentfw.agents.rag.MalformedAnswerRepair;
 import com.demo.agentfw.agents.rag.RagAgentPlugin;
@@ -58,12 +61,17 @@ public class ChatService {
     private final FollowUpRewriter rewriter;
     private final ChatProperties chatProps;
     private final TurnProgress progress;
+    private final McpCallLedger mcpLedger;
+    private final McpRegistry mcp;
     private final Object[] sessionLocks = newLocks(64);
 
     @org.springframework.beans.factory.annotation.Autowired
     public ChatService(CoordinatorFactory coordinators, RetrievalLedger ledger, GroundingVerifier verifier,
                        MalformedAnswerRepair repair, FileSummaryLedger fileLedger, ChatHistory history,
-                       FollowUpRewriter rewriter, ChatProperties chatProps, TurnProgress progress) {
+                       FollowUpRewriter rewriter, ChatProperties chatProps, TurnProgress progress,
+                       McpCallLedger mcpLedger, McpRegistry mcp) {
+        this.mcpLedger = mcpLedger;
+        this.mcp = mcp;
         this.progress = progress;
         this.coordinators = coordinators;
         this.ledger = ledger;
@@ -77,9 +85,30 @@ public class ChatService {
 
     /** A turn failed before an answer existed (the model could not be reached, a limit was hit). */
     public static class ChatFailedException extends RuntimeException {
+        private final boolean userMessage;
+
+        /** A failure of the model call itself: the message carries the provider's text and is classified. */
         public ChatFailedException(String message, Throwable cause) {
-            super(message, cause);
+            this(message, cause, false);
         }
+
+        /** {@code userMessage}: the message is already a sentence for the user and is shown as it is. */
+        public ChatFailedException(String message, Throwable cause, boolean userMessage) {
+            super(message, cause);
+            this.userMessage = userMessage;
+        }
+
+        public boolean isUserMessage() {
+            return userMessage;
+        }
+    }
+
+    /** Without MCP (tests that do not use tools). */
+    public ChatService(CoordinatorFactory coordinators, RetrievalLedger ledger, GroundingVerifier verifier,
+                       MalformedAnswerRepair repair, FileSummaryLedger fileLedger, ChatHistory history,
+                       FollowUpRewriter rewriter, ChatProperties chatProps, TurnProgress progress) {
+        this(coordinators, ledger, verifier, repair, fileLedger, history, rewriter, chatProps, progress,
+                new McpCallLedger(), null);
     }
 
     /** Without a progress listener (tests, the end-to-end runner). */
@@ -152,6 +181,10 @@ public class ChatService {
                             coordinators.runConfig(), state)
                     .toList().blockingGet();
             ChatResult result = decide(events, requestId, start, attachment, text);
+            if (!attachment && shouldTryTools(result)) {
+                String request = result.rewrittenQuestion() != null ? result.rewrittenQuestion() : effective;
+                result = tryConnectedTools(result, request, sessionId, state, requestId, start);
+            }
             history.add(sessionId, text, result.answer());
             result = result.withStages(progress.snapshot(requestId));
             return effective.equals(text) ? result : result.withRewrittenQuestion(effective);
@@ -163,6 +196,7 @@ public class ChatService {
         } finally {
             ledger.clear(requestId);
             fileLedger.clear(requestId);
+            mcpLedger.clear(requestId);
             progress.unregister(requestId);
         }
     }
@@ -171,6 +205,7 @@ public class ChatService {
         List<String> toolCalls = new ArrayList<>();
         java.util.concurrent.atomic.AtomicReference<String> routedRequest = new java.util.concurrent.atomic.AtomicReference<>();
         Optional<String> ragOutput = Optional.empty();
+        Optional<String> mcpOutput = Optional.empty();
         for (Event event : events) {
             event.functionCalls().forEach(fc -> {
                 fc.name().ifPresent(toolCalls::add);
@@ -181,6 +216,9 @@ public class ChatService {
             for (FunctionResponse response : event.functionResponses()) {
                 if (RagAgentPlugin.NAME.equals(response.name().orElse(""))) {
                     ragOutput = Optional.of(resultText(response));
+                }
+                if (McpAgentPlugin.NAME.equals(response.name().orElse(""))) {
+                    mcpOutput = Optional.of(resultText(response));
                 }
             }
         }
@@ -213,6 +251,8 @@ public class ChatService {
             result = new ChatResult(v.answer(), RagAgentPlugin.NAME, v.grounded(), v.sources(), traces,
                     new ChatResult.Verification(v.problems(), v.modelSaidNotFound(), repaired), toolCalls, output,
                     requestId, millisSince(start));
+        } else if (mcpOutput.isPresent()) {
+            result = mcpResult(mcpOutput.get(), mcpLedger.calls(requestId), traces, toolCalls, requestId, start);
         } else if (toolCalls.isEmpty()) {
             result = new ChatResult(NO_TOOL_REPLY, "none", false, List.of(), traces,
                     new ChatResult.Verification(List.of("no tool was called, so any answer would come from the model's "
@@ -232,6 +272,86 @@ public class ChatService {
         return result;
     }
 
+    // ---- connected tools (MCP) ------------------------------------------------------------------
+
+    static final String NO_TOOL_ANSWER = "None of the connected tools could answer that.";
+
+    /**
+     * The reference documents did not contain the answer (the model itself said so) and tools are
+     * connected: the question may be about their data. This is done in code because a RAG answer ends the
+     * coordinator's turn. A verification failure is not a reason: the documents had an answer.
+     */
+    private boolean shouldTryTools(ChatResult r) {
+        return mcp != null && mcp.hasTools() && RagAgentPlugin.NAME.equals(r.route()) && !r.grounded()
+                && r.verification().modelSaidNotFound();
+    }
+
+    private ChatResult tryConnectedTools(ChatResult ragResult, String request, String sessionId,
+                                         Map<String, Object> state, String requestId, long start) {
+        progress.emit(requestId, "tools", "");
+        try {
+            InMemoryRunner runner = coordinators.agentRunner(McpAgentPlugin.NAME);
+            ensureSession(runner, sessionId);
+            List<Event> events = runner.runAsync(USER_ID, sessionId, Content.fromParts(Part.fromText(request)),
+                    coordinators.runConfig(), state).toList().blockingGet();
+            List<McpCallLedger.Call> calls = mcpLedger.calls(requestId);
+            if (calls.isEmpty()) {
+                return ragResult;                      // no tool fits: the not-found answer stands
+            }
+            List<String> toolCalls = new ArrayList<>(ragResult.toolCalls());
+            toolCalls.add(McpAgentPlugin.NAME);
+            ChatResult viaTools = mcpResult(lastText(events), calls, ragResult.retrievals(), toolCalls, requestId, start);
+            return viaTools.withRewrittenQuestion(ragResult.rewrittenQuestion());
+        } catch (RuntimeException e) {
+            // the tools are a second chance: if they fail, the user still gets the honest not-found answer
+            log.warn("chat request={} connected tools failed after a not-found answer: {}", requestId,
+                    Secrets.mask(e.toString()));
+            return ragResult;
+        }
+    }
+
+    /**
+     * The answer of the tools. What happened is read from the call records, not from the agent's prose:
+     * no call means no answer; only failed calls are a tool error with the tool's own message; otherwise
+     * the agent's sentence is shown, labelled by the UI as coming from that tool and not checked against
+     * the documents, next to the raw result in the trace.
+     */
+    private ChatResult mcpResult(String agentText, List<McpCallLedger.Call> calls,
+                                 List<com.demo.agentfw.retrieval.RetrievalTrace> traces, List<String> toolCalls,
+                                 String requestId, long start) {
+        ChatResult.McpAnswer mcpTrace = new ChatResult.McpAnswer(calls);
+        if (calls.isEmpty()) {
+            return new ChatResult(NO_TOOL_ANSWER, McpAgentPlugin.NAME, false, List.of(), traces,
+                    new ChatResult.Verification(List.of("the agent called no connected tool"), false), toolCalls, null,
+                    requestId, millisSince(start));
+        }
+        McpCallLedger.Call firstOk = calls.stream().filter(c -> !c.error()).findFirst().orElse(null);
+        String answer;
+        if (firstOk == null) {
+            McpCallLedger.Call last = calls.get(calls.size() - 1);
+            answer = "The tool " + last.tool() + " on " + last.serverName() + " reported an error: "
+                    + Secrets.mask(last.message() == null ? "no details" : last.message());
+        } else {
+            String text = agentText == null ? "" : agentText.strip();
+            answer = text.isEmpty() || text.equals(McpAgentPlugin.NO_TOOL_FITS)
+                    ? "The tool " + firstOk.tool() + " on " + firstOk.serverName() + " returned: " + firstOk.result()
+                    : text;
+        }
+        return new ChatResult(answer, McpAgentPlugin.NAME, false, List.of(), traces,
+                new ChatResult.Verification(List.of(), false), toolCalls, null, requestId, millisSince(start))
+                .withMcp(mcpTrace);
+    }
+
+    private static String lastText(List<Event> events) {
+        for (int i = events.size() - 1; i >= 0; i--) {
+            Event e = events.get(i);
+            if (e.finalResponse() && e.content().isPresent()) {
+                return e.stringifyContent();
+            }
+        }
+        return "";
+    }
+
     /**
      * The file agent's result. The summary is read from the ledger, not from the model's prose. It is
      * labelled and not quote-verified ({@code grounded} false); a failure is thrown so the API can say
@@ -240,7 +360,7 @@ public class ChatService {
     private ChatResult fileResult(FileSummaryLedger.Outcome o, List<com.demo.agentfw.retrieval.RetrievalTrace> traces,
                                   List<String> toolCalls, String requestId, long start) {
         switch (o.status()) {
-            case FAILED -> throw new ChatFailedException(o.message(), null);
+            case FAILED -> throw new ChatFailedException(o.message(), null, true);
             case NO_FILE -> {
                 return new ChatResult(o.message(), FileAgentPlugin.NAME, false, List.of(), traces,
                         new ChatResult.Verification(List.of("no uploaded file to work on"), false), toolCalls, null,

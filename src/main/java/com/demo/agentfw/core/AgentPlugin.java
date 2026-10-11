@@ -25,4 +25,12 @@ public interface AgentPlugin {
     default boolean finalAnswer() {
         return true;
     }
+
+    /**
+     * False while the agent has nothing to work with (for example no MCP server is connected); the
+     * coordinator is then built without it, so the model is never offered a tool that cannot run.
+     */
+    default boolean available() {
+        return true;
+    }
 }

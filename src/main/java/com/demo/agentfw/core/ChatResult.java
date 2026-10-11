@@ -25,6 +25,8 @@ import java.util.List;
  *                    was a follow-up that had to be rewritten from the chat history; null when it was used as
  *                    written
  * @param stages      when each stage of the turn started (routing, searching, reranking, ...), in order
+ * @param mcp         set when connected MCP tools were called in this turn: which server and tool, with what
+ *                    arguments, and the raw result; the answer is then not checked against the documents
  */
 public record ChatResult(
         String answer,
@@ -39,10 +41,31 @@ public record ChatResult(
         long totalMillis,
         FileSummary file,
         String rewrittenQuestion,
-        List<StageEvent> stages) {
+        List<StageEvent> stages,
+        McpAnswer mcp) {
 
     public ChatResult {
         stages = stages == null ? List.of() : List.copyOf(stages);
+    }
+
+    public ChatResult(String answer, String route, boolean grounded, List<GroundingVerifier.Source> sources,
+                      List<RetrievalTrace> retrievals, Verification verification, List<String> toolCalls,
+                      String modelOutput, String requestId, long totalMillis, FileSummary file,
+                      String rewrittenQuestion, List<StageEvent> stages) {
+        this(answer, route, grounded, sources, retrievals, verification, toolCalls, modelOutput, requestId,
+                totalMillis, file, rewrittenQuestion, stages, null);
+    }
+
+    /** The MCP calls of a turn and who answered. */
+    public record McpAnswer(List<com.demo.agentfw.mcp.McpCallLedger.Call> calls) {
+        public McpAnswer {
+            calls = List.copyOf(calls);
+        }
+    }
+
+    public ChatResult withMcp(McpAnswer answerFromTools) {
+        return new ChatResult(answer, route, grounded, sources, retrievals, verification, toolCalls, modelOutput,
+                requestId, totalMillis, file, rewrittenQuestion, stages, answerFromTools);
     }
 
     public ChatResult(String answer, String route, boolean grounded, List<GroundingVerifier.Source> sources,
@@ -70,12 +93,12 @@ public record ChatResult(
 
     public ChatResult withRewrittenQuestion(String rewritten) {
         return new ChatResult(answer, route, grounded, sources, retrievals, verification, toolCalls, modelOutput,
-                requestId, totalMillis, file, rewritten, stages);
+                requestId, totalMillis, file, rewritten, stages, mcp);
     }
 
     public ChatResult withStages(List<StageEvent> timeline) {
         return new ChatResult(answer, route, grounded, sources, retrievals, verification, toolCalls, modelOutput,
-                requestId, totalMillis, file, rewrittenQuestion, timeline);
+                requestId, totalMillis, file, rewrittenQuestion, timeline, mcp);
     }
 
     /** What the file agent summarized and how, for the "summary of file X" label and the trace panel. */

@@ -56,6 +56,8 @@ public class CoordinatorFactory {
         });
     }
 
+    /** The MCP configuration changed: the next request builds the coordinator with the new tools. */
+    @org.springframework.context.event.EventListener(com.demo.agentfw.mcp.McpRegistry.McpConfigChanged.class)
     public synchronized void invalidate() {
         runner = null;
         agentRunners.clear();
@@ -76,7 +78,7 @@ public class CoordinatorFactory {
                 .name(COORDINATOR_NAME)
                 .description("Routes each user message to the right agent")
                 .model(model)
-                .instruction(instruction(registry.plugins()))
+                .instruction(instruction(registry.activePlugins()))
                 .generateContentConfig(config(props.coordinatorThinkingBudget()))
                 .tools(registry.agentTools(agentContext))
                 .build();

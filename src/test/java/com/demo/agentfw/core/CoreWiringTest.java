@@ -23,7 +23,10 @@ class CoreWiringTest {
     }
 
     @Test
-    void theRagAndFileAgentsAreTheRegisteredPluginsAndBothAreCoordinatorTools() {
-        assertThat(registry.plugins()).extracting(AgentPlugin::name).containsExactly("file_agent", "rag_agent");
+    void theRagFileAndMcpAgentsAreRegisteredAndTheMcpAgentOnlyWhenToolsAreConnected() {
+        assertThat(registry.plugins()).extracting(AgentPlugin::name)
+                .containsExactly("file_agent", "mcp_agent", "rag_agent");
+        // no MCP server is configured in tests, so the coordinator is not offered the MCP agent
+        assertThat(registry.activePlugins()).extracting(AgentPlugin::name).containsExactly("file_agent", "rag_agent");
     }
 }

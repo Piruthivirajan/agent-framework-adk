@@ -96,20 +96,57 @@ class ChatControllerTest {
         org.mockito.Mockito.verifyNoInteractions(chat);
     }
 
-    @Test
-    void aModelFailureIs502WithTheReasonAndAnyApiKeyMasked() throws Exception {
+    private void expectModelFailure(String providerText, int status, String code, String sentence) throws Exception {
         when(chat.chat(any(), any(), any(), any())).thenThrow(new ChatService.ChatFailedException(
-                "The model could not complete the request: 429 quota exceeded for key AIzaSyA1234567890abcdefghijkl\n"
-                        + "at com.google.genai.Client.call(Client.java:99)", null));
+                "The model could not complete the request: " + providerText, null));
 
         mvc.perform(post("/api/chat").contentType(MediaType.APPLICATION_JSON).content(body("tab-1", "hi", null)))
-                .andExpect(status().isBadGateway())
-                .andExpect(jsonPath("$.code").value("CHAT_FAILED"))
-                .andExpect(jsonPath("$.message").value(org.hamcrest.Matchers.containsString("429 quota exceeded")))
+                .andExpect(status().is(status))
+                .andExpect(jsonPath("$.code").value(code))
+                .andExpect(jsonPath("$.message").value(org.hamcrest.Matchers.containsString(sentence)))
                 .andExpect(jsonPath("$.message").value(org.hamcrest.Matchers.not(
                         org.hamcrest.Matchers.containsString("AIza"))))
                 .andExpect(jsonPath("$.message").value(org.hamcrest.Matchers.not(
                         org.hamcrest.Matchers.containsString("Client.java"))));
+    }
+
+    @Test
+    void aRateLimitedModelIs429WithAWaitMessageAndNoProviderDetails() throws Exception {
+        expectModelFailure("429 RESOURCE_EXHAUSTED quota exceeded for key AIzaSyA1234567890abcdefghijkl\n"
+                + "at com.google.genai.Client.call(Client.java:99)", 429, "MODEL_RATE_LIMITED", "rate limited");
+    }
+
+    @Test
+    void aSlowModelIs504() throws Exception {
+        expectModelFailure("java.util.concurrent.TimeoutException: timed out after 60000 ms", 504, "MODEL_TIMEOUT",
+                "took too long");
+    }
+
+    @Test
+    void aRejectedApiKeyIsExplainedForTheAdministratorWithoutTheKey() throws Exception {
+        expectModelFailure("403 PERMISSION_DENIED: API key not valid AIzaSyA1234567890abcdefghijkl", 502, "MODEL_AUTH",
+                "GOOGLE_API_KEY");
+    }
+
+    @Test
+    void anOverloadedModelIs503() throws Exception {
+        expectModelFailure("503 UNAVAILABLE: the model is overloaded", 503, "MODEL_UNAVAILABLE", "overloaded");
+    }
+
+    @Test
+    void anUnknownModelFailureGetsAGenericSentenceNotTheProvidersText() throws Exception {
+        expectModelFailure("some odd internal thing at line 42", 502, "CHAT_FAILED", "could not complete the request");
+    }
+
+    @Test
+    void aSummarizationFailureKeepsItsOwnSentenceAboutThePart() throws Exception {
+        when(chat.chat(any(), any(), any(), any())).thenThrow(new ChatService.ChatFailedException(
+                "Part 7 of 24 could not be summarized by the model after 3 attempts: 429", null, true));
+
+        mvc.perform(post("/api/chat").contentType(MediaType.APPLICATION_JSON).content(body("tab-1", "hi", null)))
+                .andExpect(status().isBadGateway())
+                .andExpect(jsonPath("$.code").value("CHAT_FAILED"))
+                .andExpect(jsonPath("$.message").value(org.hamcrest.Matchers.containsString("Part 7 of 24")));
     }
 
     @Test
@@ -166,7 +203,7 @@ class ChatControllerTest {
                 .andExpect(request().asyncStarted()).andReturn();
 
         String stream = awaitContaining(started, "\"message\":");
-        assertThat(stream).contains("\"code\":\"CHAT_FAILED\"").contains("timeout").doesNotContain("event:result");
+        assertThat(stream).contains("\"code\":\"MODEL_TIMEOUT\"").contains("took too long").doesNotContain("event:result");
     }
 
     @Test

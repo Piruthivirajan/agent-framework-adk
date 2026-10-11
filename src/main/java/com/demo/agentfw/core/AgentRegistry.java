@@ -47,10 +47,15 @@ public class AgentRegistry {
         return plugins;
     }
 
-    /** One {@link AgentTool} per plugin, each wrapping a freshly built agent. */
+    /** The plugins that can run right now (see {@link AgentPlugin#available()}). */
+    public List<AgentPlugin> activePlugins() {
+        return plugins.stream().filter(AgentPlugin::available).toList();
+    }
+
+    /** One {@link AgentTool} per available plugin, each wrapping a freshly built agent. */
     public List<BaseTool> agentTools(AgentContext context) {
         List<BaseTool> tools = new ArrayList<>();
-        for (AgentPlugin plugin : plugins) {
+        for (AgentPlugin plugin : activePlugins()) {
             tools.add(AgentTool.create(plugin.build(context), plugin.finalAnswer()));
         }
         return tools;

@@ -116,7 +116,9 @@
     <div class="bar" id="kbBar" hidden><div></div></div>
     <hr style="border:0;border-top:1px solid var(--line);margin:14px 0">
     <h2>Connected tools</h2>
-    <p class="note">MCP servers are configured on the next day of the build.</p>
+    <p class="note">External MCP servers the assistant can use when the documents have no answer.</p>
+    <p><a class="btn" id="mcpLink" href="/mcp.html" style="display:inline-block;text-decoration:none">MCP settings</a>
+       <span class="note" id="mcpSummary"></span></p>
   </aside>
 </div>
 
@@ -154,7 +156,7 @@
     understanding: 'Reading your follow-up', routing: 'Choosing an agent', searching: 'Searching the documents',
     reranking: 'Ranking the passages', answering: 'Writing the answer', repairing: 'Fixing the answer format',
     verifying: 'Checking every quote', summarizing: 'Summarizing the file', combining: 'Combining the parts',
-    condensing: 'Condensing the parts'
+    condensing: 'Condensing the parts', tools: 'Trying the connected tools'
   };
 
   // ---- small DOM helpers (text nodes only, never markup) --------------------------------------------
@@ -230,6 +232,8 @@
   }
 
   var LABELS = {
+    tool_answer: 'From a connected tool · not checked against the documents',
+    tool_error: 'A connected tool reported an error',
     answer: 'From the reference documents · every quote checked',
     summary: 'Summary of your file · not quote-checked',
     not_found: 'Not in the reference documents',
@@ -239,6 +243,10 @@
   function addAnswer(r) {
     var label = LABELS[r.kind] || r.kind;
     if (r.kind === 'summary' && r.file) label = 'Summary of ' + r.file.name + ' · not quote-checked';
+    if (r.kind === 'tool_answer' && r.mcp && r.mcp.calls.length) {
+      var okCall = r.mcp.calls.filter(function (c) { return !c.error; })[0] || r.mcp.calls[0];
+      label = 'From tool ' + okCall.tool + ' on ' + okCall.serverName + ' · not checked against the documents';
+    }
     var bubble = el('div', { class: 'bubble' }, [
       el('span', { class: 'label ' + r.kind, text: label }), el('br'), document.createTextNode(r.answer)
     ]);
@@ -291,6 +299,17 @@
       ]));
     }
     (r.retrievals || []).forEach(function (t, i) { body.appendChild(retrievalBlock(t, i + 1)); });
+    if (r.mcp && r.mcp.calls) {
+      r.mcp.calls.forEach(function (c, i) {
+        body.appendChild(el('div', { class: 'where', style: 'font-weight:600;margin-top:8px',
+          text: 'Tool call ' + (i + 1) + ': ' + c.tool + ' on ' + c.serverName + (c.error ? ' (error)' : '') + ' · ' + ms(c.millis) }));
+        body.appendChild(el('div', { class: 'kv' }, [el('span', { text: 'arguments: ' + JSON.stringify(c.arguments) })]));
+        body.appendChild(el('details', null, [el('summary', { text: 'Raw tool result' }),
+          el('div', { class: 'body' }, [el('pre', { style: 'white-space:pre-wrap;overflow-wrap:anywhere;margin:0',
+            text: c.error ? (c.message || 'error') + (c.result ? '
+' + c.result : '') : c.result })])]));
+      });
+    }
     return el('details', null, [el('summary', { text: 'How this answer was produced' }), body]);
   }
 
@@ -523,7 +542,15 @@
     try { sessionStorage.removeItem(SESSION_KEY); } catch (e) { /* ignore */ }
     location.reload();
   });
+  function loadMcp() {
+    fetch('/api/mcp/servers').then(function (r) { return r.ok ? r.json() : []; }).then(function (servers) {
+      var tools = 0, ok = 0;
+      servers.forEach(function (s) { if (s.status === 'CONNECTED') { ok++; tools += s.tools.length; } });
+      $('mcpSummary').textContent = servers.length ? ok + ' of ' + servers.length + ' connected, ' + tools + ' tools' : 'none configured';
+    }).catch(function () { /* a convenience */ });
+  }
   loadDocs();
+  loadMcp();
   input.focus();
 })();
 </script>

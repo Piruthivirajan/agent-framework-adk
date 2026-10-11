@@ -1,0 +1,275 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MCP servers · Agent Framework</title>
+<style>
+  :root {
+    --bg: #f6f7f9; --panel: #ffffff; --text: #1c2330; --muted: #5d6778; --line: #dfe3ea;
+    --accent: #2457d6; --accent-text: #ffffff; --ok: #19734a; --warn: #8a5a00; --bad: #b3261e; --chip: #eef1f6;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #12151b; --panel: #1b2029; --text: #e6e9ef; --muted: #9aa4b5; --line: #2c3340;
+      --accent: #6c93ff; --accent-text: #0b1020; --ok: #5fd39a; --warn: #f0b84a; --bad: #ff8a80; --chip: #262c38;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  header { display: flex; align-items: center; gap: 12px; padding: 10px 16px; border-bottom: 1px solid var(--line); background: var(--panel); }
+  header h1 { font-size: 16px; margin: 0; flex: 1; }
+  main { max-width: 860px; margin: 0 auto; padding: 16px; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px; margin-bottom: 16px; }
+  h2 { font-size: 15px; margin: 0 0 8px; }
+  label { display: block; font-size: 13px; color: var(--muted); margin: 10px 0 2px; }
+  input, select { font: inherit; color: var(--text); background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 7px 9px; width: 100%; }
+  .row { display: flex; gap: 8px; align-items: center; margin-top: 6px; }
+  .row input { flex: 1; }
+  button { font: inherit; border: 1px solid var(--line); background: var(--panel); color: var(--text); border-radius: 8px; padding: 6px 12px; cursor: pointer; }
+  button.primary { background: var(--accent); color: var(--accent-text); border-color: var(--accent); font-weight: 600; }
+  button.danger { color: var(--bad); }
+  button:disabled { opacity: .5; cursor: default; }
+  .note { color: var(--muted); font-size: 13px; }
+  .notice { border-left: 3px solid var(--warn); padding: 6px 10px; background: var(--chip); border-radius: 4px; font-size: 13px; margin: 8px 0; }
+  .chip { display: inline-block; font-size: 12px; font-weight: 600; padding: 2px 8px; border-radius: 999px; background: var(--chip); }
+  .CONNECTED { color: var(--ok); } .ERROR { color: var(--bad); } .DISABLED { color: var(--muted); }
+  .result { margin-top: 10px; padding: 8px 10px; border-radius: 8px; border: 1px solid var(--line); font-size: 14px; white-space: pre-wrap; overflow-wrap: anywhere; }
+  .result.ok { border-color: var(--ok); } .result.bad { border-color: var(--bad); color: var(--bad); }
+  ul.tools { margin: 6px 0 0; padding-left: 18px; font-size: 13px; }
+  ul.tools li span { color: var(--muted); }
+  .server-head { display: flex; gap: 10px; align-items: baseline; flex-wrap: wrap; }
+  .server-head strong { font-size: 15px; }
+  .actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
+  code { background: var(--chip); padding: 1px 5px; border-radius: 4px; font-size: 13px; overflow-wrap: anywhere; }
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>MCP servers</h1>
+  <a href="/" style="color:var(--accent)">Back to chat</a>
+</header>
+<main>
+  <div class="card">
+    <h2>What this page does</h2>
+    <p class="note" style="margin:0">Connect an MCP server and its tools become available to the assistant at the next message, without a restart.
+      When the reference documents have no answer, the assistant tries these tools.</p>
+    <div class="notice"><strong>Supported:</strong> MCP servers reachable over the network with <em>Streamable HTTP</em> (current) or the older <em>SSE</em> transport.
+      <strong>Not supported: stdio</strong> servers (started as a local command), because a hosted application cannot run commands for you.</div>
+    <div class="notice"><strong>Credentials:</strong> kept in the memory of the running application only, shown here by header name only, never written to disk or to the log, and never sent to the language model.
+      They are lost when the application restarts.</div>
+  </div>
+
+  <div class="card" id="servers"><h2>Configured servers</h2><div id="list" aria-live="polite"><p class="note">Loading…</p></div></div>
+
+  <div class="card">
+    <h2>Add a server</h2>
+    <form id="form" autocomplete="off">
+      <label for="name">Name</label>
+      <input id="name" maxlength="60" placeholder="Orders" required>
+      <label for="url">URL</label>
+      <input id="url" placeholder="http://localhost:8099/mcp" required>
+      <label for="transport">Transport</label>
+      <select id="transport">
+        <option value="STREAMABLE_HTTP">Streamable HTTP (current), for example …/mcp</option>
+        <option value="SSE">SSE (older), for example …/sse</option>
+      </select>
+      <label>Headers (for example <code>Authorization</code> = <code>Bearer &lt;token&gt;</code>)</label>
+      <div id="headers"></div>
+      <div class="row"><button type="button" id="addHeader">Add header</button></div>
+      <div class="actions">
+        <button type="button" id="test">Test connection</button>
+        <button type="submit" class="primary" id="save">Save server</button>
+      </div>
+    </form>
+    <div id="formResult" role="status" aria-live="polite"></div>
+  </div>
+</main>
+
+<script>
+(function () {
+  'use strict';
+  var $ = function (id) { return document.getElementById(id); };
+
+  function el(tag, props, children) {
+    var n = document.createElement(tag);
+    if (props) Object.keys(props).forEach(function (k) {
+      if (k === 'class') n.className = props[k]; else if (k === 'text') n.textContent = props[k]; else n.setAttribute(k, props[k]);
+    });
+    (children || []).forEach(function (c) { if (c) n.appendChild(typeof c === 'string' ? document.createTextNode(c) : c); });
+    return n;
+  }
+
+  function api(method, url, body) {
+    return fetch(url, {
+      method: method,
+      headers: body ? { 'Content-Type': 'application/json' } : {},
+      body: body ? JSON.stringify(body) : undefined
+    }).then(function (res) {
+      if (res.status === 204) return null;
+      return res.text().then(function (t) {
+        var data = null;
+        try { data = JSON.parse(t); } catch (e) { /* not JSON */ }
+        if (!res.ok) {
+          var err = new Error(data && data.message ? data.message : 'The server returned an error (' + res.status + ').');
+          throw err;
+        }
+        return data;
+      });
+    });
+  }
+
+  // ---- header rows of the add form -------------------------------------------------------------
+  function headerRow(name, placeholder) {
+    var n = el('input', { 'aria-label': 'Header name', placeholder: 'Header name', value: name || '' });
+    var v = el('input', { 'aria-label': 'Header value', type: 'password', autocomplete: 'new-password', placeholder: placeholder || 'Value' });
+    var rm = el('button', { type: 'button', text: 'Remove' });
+    var row = el('div', { class: 'row' }, [n, v, rm]);
+    rm.addEventListener('click', function () { row.remove(); });
+    return row;
+  }
+  function readHeaders(container) {
+    var out = {}, any = false;
+    container.querySelectorAll('.row').forEach(function (r) {
+      var inputs = r.querySelectorAll('input');
+      var k = inputs[0].value.trim(), v = inputs[1].value;
+      if (k) { out[k] = v; any = true; }
+    });
+    return any ? out : null;
+  }
+  $('headers').appendChild(headerRow('Authorization', 'Bearer <token>'));
+  $('addHeader').addEventListener('click', function () { $('headers').appendChild(headerRow('', '')); });
+
+  function formBody() {
+    return {
+      name: $('name').value.trim(), url: $('url').value.trim(), transport: $('transport').value,
+      headers: readHeaders($('headers')) || {}
+    };
+  }
+
+  function showResult(box, ok, text, tools) {
+    box.textContent = '';
+    var r = el('div', { class: 'result ' + (ok ? 'ok' : 'bad'), text: text });
+    if (tools && tools.length) {
+      var ul = el('ul', { class: 'tools' });
+      tools.forEach(function (t) { ul.appendChild(el('li', null, [el('strong', { text: t.name }), el('span', { text: t.description ? ' – ' + t.description : '' })])); });
+      r.appendChild(ul);
+    }
+    box.appendChild(r);
+  }
+
+  // ---- form actions ----------------------------------------------------------------------------
+  $('test').addEventListener('click', function () {
+    var box = $('formResult');
+    box.textContent = '';
+    box.appendChild(el('p', { class: 'note', text: 'Connecting…' }));
+    $('test').disabled = true;
+    api('POST', '/api/mcp/servers/test', formBody()).then(function (r) {
+      if (r.ok) showResult(box, true, 'Connected. ' + r.tools.length + ' tool' + (r.tools.length === 1 ? '' : 's') + ' available:', r.tools);
+      else showResult(box, false, r.error.message);
+    }).catch(function (e) { showResult(box, false, e.message); })
+      .then(function () { $('test').disabled = false; });
+  });
+
+  $('form').addEventListener('submit', function (ev) {
+    ev.preventDefault();
+    var box = $('formResult');
+    box.textContent = '';
+    box.appendChild(el('p', { class: 'note', text: 'Saving and loading the tools…' }));
+    $('save').disabled = true;
+    api('POST', '/api/mcp/servers', formBody()).then(function (s) {
+      if (s.status === 'CONNECTED') {
+        showResult(box, true, 'Saved. ' + s.tools.length + ' tool' + (s.tools.length === 1 ? '' : 's') + ' are now available to the assistant.', s.tools);
+        $('form').reset();
+        $('headers').textContent = '';
+        $('headers').appendChild(headerRow('Authorization', 'Bearer <token>'));
+      } else {
+        showResult(box, false, 'Saved, but the server cannot be used yet: ' + (s.error ? s.error.message : s.status));
+      }
+      load();
+    }).catch(function (e) { showResult(box, false, e.message); })
+      .then(function () { $('save').disabled = false; });
+  });
+
+  // ---- the list --------------------------------------------------------------------------------
+  function load() {
+    api('GET', '/api/mcp/servers').then(render).catch(function (e) {
+      $('list').textContent = '';
+      $('list').appendChild(el('p', { class: 'result bad', text: e.message }));
+    });
+  }
+
+  function render(servers) {
+    var list = $('list');
+    list.textContent = '';
+    if (!servers.length) {
+      list.appendChild(el('p', { class: 'note', text: 'No server is configured yet. Add one below; the demo server is described in the README.' }));
+      return;
+    }
+    servers.forEach(function (s) { list.appendChild(serverCard(s)); });
+  }
+
+  function serverCard(s) {
+    var card = el('div', { class: 'card', style: 'margin-bottom:12px' });
+    card.appendChild(el('div', { class: 'server-head' }, [
+      el('strong', { text: s.name }),
+      el('span', { class: 'chip ' + s.status, text: { CONNECTED: 'Connected', ERROR: 'Problem', DISABLED: 'Disabled' }[s.status] || s.status }),
+      el('span', { class: 'note', text: (s.transport === 'SSE' ? 'SSE' : 'Streamable HTTP') + ' · ' + s.url })
+    ]));
+    card.appendChild(el('div', { class: 'note', text: 'Credentials: ' + (s.headerNames.length ? s.headerNames.join(', ') + ' (values hidden)' : 'none') }));
+    if (s.error) card.appendChild(el('div', { class: 'result bad', text: s.error.message }));
+    if (s.tools.length) {
+      var ul = el('ul', { class: 'tools' });
+      s.tools.forEach(function (t) { ul.appendChild(el('li', null, [el('strong', { text: t.name }), el('span', { text: t.description ? ' – ' + t.description : '' })])); });
+      card.appendChild(ul);
+    }
+    var out = el('div', { role: 'status', 'aria-live': 'polite' });
+    var actions = el('div', { class: 'actions' });
+    var retest = el('button', { type: 'button', text: 'Test again' });
+    var toggle = el('button', { type: 'button', text: s.enabled ? 'Disable' : 'Enable' });
+    var creds = el('button', { type: 'button', text: 'Change credentials' });
+    var del = el('button', { type: 'button', class: 'danger', text: 'Delete' });
+    actions.appendChild(retest); actions.appendChild(toggle); actions.appendChild(creds); actions.appendChild(del);
+    card.appendChild(actions);
+    card.appendChild(out);
+
+    retest.addEventListener('click', function () { act(api('POST', '/api/mcp/servers/' + s.id + '/test')); });
+    toggle.addEventListener('click', function () { act(api('PUT', '/api/mcp/servers/' + s.id, { enabled: !s.enabled })); });
+    del.addEventListener('click', function () {
+      if (window.confirm('Delete the server "' + s.name + '"?')) act(api('DELETE', '/api/mcp/servers/' + s.id));
+    });
+    creds.addEventListener('click', function () {
+      out.textContent = '';
+      var box = el('div'), rows = el('div');
+      rows.appendChild(headerRow('Authorization', 'Bearer <new token>'));
+      var save = el('button', { type: 'button', class: 'primary', text: 'Save credentials' });
+      var addH = el('button', { type: 'button', text: 'Add header' });
+      addH.addEventListener('click', function () { rows.appendChild(headerRow('', '')); });
+      save.addEventListener('click', function () {
+        var h = readHeaders(rows);
+        if (!h) { out.textContent = ''; out.appendChild(el('div', { class: 'result bad', text: 'Enter at least one header.' })); return; }
+        act(api('PUT', '/api/mcp/servers/' + s.id, { headers: h }));
+      });
+      box.appendChild(el('p', { class: 'note', text: 'The new headers replace the stored ones.' }));
+      box.appendChild(rows);
+      box.appendChild(el('div', { class: 'actions' }, [addH, save]));
+      out.appendChild(box);
+    });
+
+    function act(promise) {
+      out.textContent = '';
+      out.appendChild(el('p', { class: 'note', text: 'Working…' }));
+      promise.then(function () { load(); }).catch(function (e) {
+        out.textContent = '';
+        out.appendChild(el('div', { class: 'result bad', text: e.message }));
+      });
+    }
+    return card;
+  }
+
+  load();
+})();
+</script>
+</body>
+</html>
