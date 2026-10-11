@@ -42,3 +42,4 @@ agentfw:
     chunk-target-tokens: 650
     chunk-overlap-percent: 15
     chunk-min-tail-tokens: 100
+    strip-running-headers: true  # drop lines repeated at the top/bottom of most pages (see RunningHeaderStripper)

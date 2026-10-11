@@ -79,12 +79,15 @@ public class MongoChunkStore implements ChunkStore {
                 Aggregates.group("$docId",
                         Accumulators.addToSet("hashes", "$contentHash"),
                         Accumulators.addToSet("models", "$embeddingModel"),
+                        Accumulators.addToSet("pipelines",
+                                new Document("$ifNull", List.of("$pipelineVersion", StoredChunk.LEGACY_PIPELINE))),
                         Accumulators.sum("n", 1)))).into(new ArrayList<>());
         for (Document g : groups) {
             result.put(g.getString("_id"), new DocState(
                     toStringSet(g.getList("hashes", Object.class)),
                     toStringSet(g.getList("models", Object.class)),
-                    ((Number) g.get("n")).intValue()));
+                    ((Number) g.get("n")).intValue(),
+                    toStringSet(g.getList("pipelines", Object.class))));
         }
         return result;
     }
@@ -126,6 +129,7 @@ public class MongoChunkStore implements ChunkStore {
                 .append("text", c.text())
                 .append("contentHash", c.contentHash())
                 .append("embeddingModel", c.embeddingModel())
+                .append("pipelineVersion", c.pipelineVersion())
                 .append("embedding", vector);
     }
 

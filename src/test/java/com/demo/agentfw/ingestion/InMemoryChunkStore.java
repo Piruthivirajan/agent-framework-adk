@@ -21,7 +21,8 @@ class InMemoryChunkStore implements ChunkStore {
                 out.put(docId, new DocState(
                         new HashSet<>(chunks.stream().map(StoredChunk::contentHash).toList()),
                         new HashSet<>(chunks.stream().map(StoredChunk::embeddingModel).toList()),
-                        chunks.size()));
+                        chunks.size(),
+                        new HashSet<>(chunks.stream().map(StoredChunk::pipelineVersion).toList())));
             }
         });
         return out;

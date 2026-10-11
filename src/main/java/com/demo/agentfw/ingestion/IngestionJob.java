@@ -22,8 +22,9 @@ import java.util.stream.Stream;
  * Loads the PDF corpus into the chunk store. Safe to run any number of times: a document is only
  * embedded when its content hash or the embedding model differs from what is stored.
  *
- * <p>Per document: hash the file; if the store already has exactly that hash and model, skip (no
- * parsing, no API call). Otherwise parse, chunk and embed everything first, and only then replace
+ * <p>Per document: hash the file; if the store already has exactly that hash, model and pipeline
+ * version, skip (no parsing, no API call). The pipeline version covers what the file bytes do not:
+ * the cleaning and chunking settings. Otherwise parse, clean, chunk and embed everything first, and only then replace
  * the stored chunks in one transaction, so an embedding failure leaves the old version intact.
  * Documents removed from the folder are pruned, unless the folder has no PDFs at all (more likely
  * a wrong path than an intentional wipe).
@@ -36,15 +37,18 @@ public class IngestionJob {
     private final AgentFwProperties app;
     private final IngestionProperties props;
     private final PdfLoader loader;
+    private final RunningHeaderStripper stripper;
     private final Chunker chunker;
     private final EmbeddingService embeddings;
     private final ChunkStore store;
 
-    public IngestionJob(AgentFwProperties app, IngestionProperties props, PdfLoader loader, Chunker chunker,
-                        EmbeddingService embeddings, ChunkStore store) {
+    public IngestionJob(AgentFwProperties app, IngestionProperties props, PdfLoader loader,
+                        RunningHeaderStripper stripper, Chunker chunker, EmbeddingService embeddings,
+                        ChunkStore store) {
         this.app = app;
         this.props = props;
         this.loader = loader;
+        this.stripper = stripper;
         this.chunker = chunker;
         this.embeddings = embeddings;
         this.store = store;
@@ -110,6 +114,14 @@ public class IngestionJob {
     /** @return false when the file has no extractable text (any stale chunks are removed). */
     private boolean ingest(String tenant, SourceDocument doc) {
         List<PdfPage> pages = loader.loadPages(doc);
+        if (props.stripRunningHeaders()) {
+            RunningHeaderStripper.Result cleaned = stripper.strip(pages);
+            if (cleaned.removedLines() > 0) {
+                log.info("{}: removed {} running header/footer lines ({} patterns)", doc.fileName(),
+                        cleaned.removedLines(), cleaned.patterns().size());
+            }
+            pages = cleaned.pages();
+        }
         List<TextChunk> chunks = chunker.chunk(pages);
         if (chunks.isEmpty()) {
             log.warn("{} has no extractable text ({} pages); is it a scan? Nothing stored", doc.fileName(), pages.size());
@@ -124,7 +136,7 @@ public class IngestionJob {
         for (int i = 0; i < chunks.size(); i++) {
             TextChunk c = chunks.get(i);
             toStore.add(new StoredChunk(tenant, doc.docId(), c.index(), doc.fileName(), c.page(), c.text(),
-                    doc.contentHash(), embeddings.modelName(), vectors.get(i)));
+                    doc.contentHash(), embeddings.modelName(), vectors.get(i), props.pipelineVersion()));
         }
         store.replaceDocument(tenant, doc.docId(), toStore);
         log.info("Ingested {}: {} pages, {} chunks", doc.fileName(), pages.size(), toStore.size());
@@ -134,7 +146,8 @@ public class IngestionJob {
     private boolean isUpToDate(ChunkStore.DocState state, SourceDocument doc) {
         return state != null
                 && state.contentHashes().equals(Set.of(doc.contentHash()))
-                && state.embeddingModels().equals(Set.of(embeddings.modelName()));
+                && state.embeddingModels().equals(Set.of(embeddings.modelName()))
+                && state.pipelineVersions().equals(Set.of(props.pipelineVersion()));
     }
 
     private static List<Path> listPdfs(Path dir) {

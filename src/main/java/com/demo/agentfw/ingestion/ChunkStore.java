@@ -14,8 +14,14 @@ public interface ChunkStore {
      * @param contentHashes   distinct source hashes found on its chunks (one value when consistent)
      * @param embeddingModels distinct embedding models found on its chunks
      * @param chunkCount      number of stored chunks
+     * @param pipelineVersions distinct pipeline versions found on its chunks ("1" for chunks stored before versions existed)
      */
-    record DocState(Set<String> contentHashes, Set<String> embeddingModels, int chunkCount) {
+    record DocState(Set<String> contentHashes, Set<String> embeddingModels, int chunkCount,
+                    Set<String> pipelineVersions) {
+
+        public DocState(Set<String> contentHashes, Set<String> embeddingModels, int chunkCount) {
+            this(contentHashes, embeddingModels, chunkCount, Set.of(StoredChunk.LEGACY_PIPELINE));
+        }
     }
 
     /** Stored state per docId for a tenant. */
