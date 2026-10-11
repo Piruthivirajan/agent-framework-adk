@@ -15,14 +15,14 @@ import java.util.Map;
 import java.util.function.Consumer;
 
 /** A real {@link RetrievalService} over canned candidates, so agent tests need no MongoDB or model. */
-final class TestRetrieval {
+public final class TestRetrieval {
 
     static final double FLOOR = -6.5;
 
     private TestRetrieval() {
     }
 
-    static Candidate candidate(int rank, String file, int page, String text) {
+    public static Candidate candidate(int rank, String file, int page, String text) {
         return new Candidate("id" + rank, "doc", file, page, rank, text, rank, 0.5, null, null, 1.0 / (60 + rank), rank);
     }
 
@@ -31,7 +31,7 @@ final class TestRetrieval {
      * @param score      reranker score of the candidate at that index (0-based)
      * @param onSearch   called with each query, or null
      */
-    static RetrievalService service(List<Candidate> candidates, java.util.function.IntToDoubleFunction score,
+    public static RetrievalService service(List<Candidate> candidates, java.util.function.IntToDoubleFunction score,
                                     Consumer<String> onSearch) {
         ChunkSearch search = (query, vector, settings) -> {
             if (onSearch != null) {
@@ -59,7 +59,7 @@ final class TestRetrieval {
         return new RetrievalService(new FakeEmbeddingService(8, "fake-embed"), search, reranker, props);
     }
 
-    static List<Candidate> sampleCandidates() {
+    public static List<Candidate> sampleCandidates() {
         List<Candidate> out = new ArrayList<>();
         out.add(candidate(1, "wellarchitected-framework.pdf", 7,
                 "The AWS Well-Architected Tool (AWS WA Tool) is a service in the cloud that provides a consistent "

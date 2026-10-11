@@ -57,7 +57,7 @@ Decisions: `gemini-3.8-flash` for both agents, configurable by name, low thinkin
 - [x] 1. Plugin framework: `AgentPlugin`, `AgentRegistry`, `CoordinatorFactory`, `ModelFactory`, third-plugin test
 - [x] 2. Retrieval tool, `RetrievalLedger`, `RagAgentPlugin` (instruction and JSON contract); rename `GroundingDecision.OK`
 - [x] 3. `GroundingVerifier` (quote and numeric support) and renderer
-- [ ] 4. `ChatService` with scripted-model scenario A and B tests
+- [x] 4. `ChatService` with scripted-model scenario A and B tests
 - [ ] 5. Live scenarios A and B; thinking-budget measurement
 - [ ] 6. 48-question end-to-end run, `docs/END_TO_END.md`
 
@@ -81,6 +81,14 @@ Retrieval gate (done, Day 3): a low **floor** at -6.5 removes only clear junk; 3
 ## Log
 
 <!-- Newest first. One entry per task: date, what was built, what was verified. -->
+
+### 2026-10-11: Day 4 step 4, ChatService
+- `ChatService.chat(sessionId, text)` creates the session if needed, runs the coordinator with a per-turn `requestId` as state delta, and decides **in code**: the RAG agent's function response (read from the coordinator's events, key `result`) goes through `GroundingVerifier` and the verified text is the answer; the coordinator's own prose is ignored. No tool called: the fixed reply "I can answer questions about the reference documents, summarize files, or use connected tools. I couldn't find that in the reference documents." (route `none`). The ledger entries of the turn are cleared in `finally`.
+- `ChatResult`: `answer`, `route`, `grounded`, `sources` (file, page, quote; quotes never inline), `retrievals` (one trace per search), `verification` (problems, model said NOT_FOUND), `toolCalls`, `modelOutput` (raw, for debugging and the report), `requestId`, `totalMillis`.
+- A turn that used only a non-RAG agent fails closed with the not-found text and a recorded reason ("no verification path yet"), so unverified prose can never pass through by accident. **Day 6: MCP tool answers (and the file agent) need their own path; this verification rule is for RAG answers only.** Note also that `finalAnswer=true` ends the turn after one agent, so "RAG then MCP" needs a different arrangement.
+- Failure behaviour (observed, tested): a model error or a runaway loop ends the turn as `ChatFailedException` ("The model could not complete the request"), bounded by `maxLlmCalls` (12; 13 requests were issued before the cut-off). The Day 5 UI must turn that into a clear message.
+- Scenario tests with a scripted model: A (cited, verified answer, sources, trace), B (not-found sentence, trace shows `NO_RELEVANT_CONTEXT`), fabricated quote replaced, a figure from the model's memory replaced although the quote is real, coordinator prose ignored, no-tool reply, another agent's prose not passed through, a turn cannot cite a previous turn's chunks, model failure, runaway loop.
+- Verified: BUILD SUCCESS, 173 tests.
 
 ### 2026-10-11: Day 4 step 3, grounding verifier
 - `GroundingVerifier.verify(modelOutput, requestId)` is plain code after the model. The answer is shown only if **every** claim passes; otherwise the whole answer becomes "Not found in the reference documents." A claim passes when: its `ref` was returned by retrieval **in this request** (ledger lookup); its quote has at least 25 characters and 4 words (and at most 400); the quote occurs in that chunk's text after NFKC and whitespace normalisation, case and punctuation exact; every number in the claim's `text` also occurs in **its quote** (the chunk containing the number is not enough), with formats normalised (`1,000` = `1000`, `14.0` = `14`, `09` = `9`).

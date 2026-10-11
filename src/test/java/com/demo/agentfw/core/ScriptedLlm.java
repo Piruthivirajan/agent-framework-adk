@@ -66,10 +66,16 @@ public class ScriptedLlm extends BaseLlm {
         return request.tools().keySet();
     }
 
-    /** True once a tool result is already in the conversation, i.e. this is the model's follow-up turn. */
+    /**
+     * True when the last message of the conversation is a tool result, i.e. this call is the model's
+     * follow-up to a tool it just called. Earlier turns in the session history do not count.
+     */
     public static boolean hasToolResult(LlmRequest request) {
-        return request.contents().stream()
-                .flatMap(c -> c.parts().orElse(List.of()).stream())
+        List<Content> contents = request.contents();
+        if (contents.isEmpty()) {
+            return false;
+        }
+        return contents.get(contents.size() - 1).parts().orElse(List.of()).stream()
                 .anyMatch(p -> p.functionResponse().isPresent());
     }
 }
