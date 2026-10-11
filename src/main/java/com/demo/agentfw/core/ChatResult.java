@@ -21,6 +21,9 @@ import java.util.List;
  * @param totalMillis wall time of the whole turn
  * @param file        set when the file agent summarized a file: the answer is then a labelled summary that is
  *                    not quote-verified ({@code grounded} is false); null otherwise
+ * @param rewrittenQuestion the standalone message the coordinator actually received when the user's message
+ *                    was a follow-up that had to be rewritten from the chat history; null when it was used as
+ *                    written
  */
 public record ChatResult(
         String answer,
@@ -33,14 +36,27 @@ public record ChatResult(
         String modelOutput,
         String requestId,
         long totalMillis,
-        FileSummary file) {
+        FileSummary file,
+        String rewrittenQuestion) {
 
     /** Without a file summary (every RAG and no-tool result). */
     public ChatResult(String answer, String route, boolean grounded, List<GroundingVerifier.Source> sources,
                       List<RetrievalTrace> retrievals, Verification verification, List<String> toolCalls,
                       String modelOutput, String requestId, long totalMillis) {
         this(answer, route, grounded, sources, retrievals, verification, toolCalls, modelOutput, requestId,
-                totalMillis, null);
+                totalMillis, null, null);
+    }
+
+    public ChatResult(String answer, String route, boolean grounded, List<GroundingVerifier.Source> sources,
+                      List<RetrievalTrace> retrievals, Verification verification, List<String> toolCalls,
+                      String modelOutput, String requestId, long totalMillis, FileSummary file) {
+        this(answer, route, grounded, sources, retrievals, verification, toolCalls, modelOutput, requestId,
+                totalMillis, file, null);
+    }
+
+    public ChatResult withRewrittenQuestion(String rewritten) {
+        return new ChatResult(answer, route, grounded, sources, retrievals, verification, toolCalls, modelOutput,
+                requestId, totalMillis, file, rewritten);
     }
 
     /** What the file agent summarized and how, for the "summary of file X" label and the trace panel. */

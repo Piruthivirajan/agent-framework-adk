@@ -84,7 +84,7 @@ Decisions (user): file agent shape decided by the step 0 spike; **two paths** to
 - [x] 2. Uploads: Tika parsing, `uploads` collection (TTL), limits, error messages
 - [x] 3. `MapReduceSummarizer` (single pass, map-reduce, hierarchical reduce, failure behaviour)
 - [x] 4. `FileAgentPlugin`, fast path by code, coordinator tool with session files, summaries labelled
-- [ ] 5. Follow-up rewriting from chat history (3 follow-up pairs in tests)
+- [x] 5. Follow-up rewriting from chat history (3 follow-up pairs in tests)
 - [ ] 6. API: `/api/chat`, `/api/files`, error handler; SSE stage events
 - [ ] 7. Knowledge base: `POST /api/kb/documents`, single-file ingestion with progress, no-text-layer rejection
 - [ ] 8. UI: chat, attach/paste, sources, trace panel, progress, KB upload; verified in the browser on A, B, C
@@ -97,6 +97,13 @@ Decisions (user): file agent shape decided by the step 0 spike; **two paths** to
 ## Log
 
 <!-- Newest first. One entry per task: date, what was built, what was verified. -->
+
+### 2026-10-11: Day 5 step 5, follow-up questions made standalone
+- **Why:** the RAG agent runs in an isolated session and searches with the words it is given, so "who can use it?" would be searched literally. `ChatService` now keeps the last 4 turns per chat session (`ChatHistory`, in memory, answers cut to 500 characters, least recently used session dropped beyond 500 sessions) and, for every text turn that has history, asks `FollowUpRewriter` (one short model call, `TextGenerator`) to restate the latest message as a standalone one. The coordinator receives the rewritten text, so routing and the RAG search both benefit; `ChatResult.rewrittenQuestion` records it for the trace panel.
+- **Guards:** a message that is already standalone must come back unchanged; an empty or implausibly long rewrite is discarded and the original is used; a failing model call falls back to the original (a bad rewrite can only cost a worse search, never an error). An attachment turn is not rewritten (its text is an instruction for the file agent). `agentfw.chat.rewrite-follow-ups` switches it off.
+- **Cost, stated plainly:** one extra short model call on every turn after the first in a session (about 1 to 2 s with thinking budget 0; to be measured live in step 6). A gate that skips the call for messages that look standalone is possible but a heuristic could miss follow-ups, so it is not built; measure first.
+- **Tests (the 3 follow-up pairs asked for):** pair 1 RAG pronoun ("Who can use it?" after the Well-Architected Tool answer), pair 2 file ("Make it shorter" after a file summary, history carries the summary), pair 3 terse fragment ("And the cost one?"); plus: standalone question unchanged and not marked, no model call without history, history is per session, a failing rewriter does not block the turn.
+- Verified: BUILD SUCCESS, 257 tests. Live check of the real model's rewriting and follow-up routing: step 6 (through the HTTP API).
 
 ### 2026-10-11: Day 5 step 4, file agent plugin and the two paths to it
 - **`FileAgentPlugin`** (`agents/file`): an `AgentPlugin` whose agent is a custom `BaseAgent` that runs `MapReduceSummarizer` in code (step 0 decision). It never asks a model which file or which tool; code resolves the file in this order: the attachment of this turn (never falls back to another file; an expired id says "no longer available"), a `fileId=` in the request, an uploaded file whose name the request mentions (later upload wins), the session's most recent upload.

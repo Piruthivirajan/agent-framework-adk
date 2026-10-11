@@ -53,14 +53,21 @@ public class ChatService {
     private final GroundingVerifier verifier;
     private final MalformedAnswerRepair repair;
     private final FileSummaryLedger fileLedger;
+    private final ChatHistory history;
+    private final FollowUpRewriter rewriter;
+    private final ChatProperties chatProps;
 
     public ChatService(CoordinatorFactory coordinators, RetrievalLedger ledger, GroundingVerifier verifier,
-                       MalformedAnswerRepair repair, FileSummaryLedger fileLedger) {
+                       MalformedAnswerRepair repair, FileSummaryLedger fileLedger, ChatHistory history,
+                       FollowUpRewriter rewriter, ChatProperties chatProps) {
         this.coordinators = coordinators;
         this.ledger = ledger;
         this.verifier = verifier;
         this.repair = repair;
         this.fileLedger = fileLedger;
+        this.history = history;
+        this.rewriter = rewriter;
+        this.chatProps = chatProps;
     }
 
     /** A turn failed before an answer existed (the model could not be reached, a limit was hit). */
@@ -87,16 +94,24 @@ public class ChatService {
             InMemoryRunner runner = attachment ? coordinators.agentRunner(FileAgentPlugin.NAME)
                     : coordinators.runner();
             ensureSession(runner, sessionId);
+            // a follow-up is made standalone before routing; an attachment's text is an instruction, not a question
+            String effective = attachment || !chatProps.rewriteFollowUps() ? text
+                    : rewriter.rewrite(history.recent(sessionId), text);
+            if (!effective.equals(text)) {
+                log.info("chat request={} follow-up rewritten", requestId);
+            }
             Map<String, Object> state = new HashMap<>();
             state.put(TurnState.REQUEST_ID, requestId);
             state.put(TurnState.SESSION_ID, sessionId);
             if (attachment) {
                 state.put(TurnState.FILE_ID, fileId);
             }
-            List<Event> events = runner.runAsync(USER_ID, sessionId, Content.fromParts(Part.fromText(text)),
+            List<Event> events = runner.runAsync(USER_ID, sessionId, Content.fromParts(Part.fromText(effective)),
                             coordinators.runConfig(), state)
                     .toList().blockingGet();
-            return decide(events, requestId, start, attachment);
+            ChatResult result = decide(events, requestId, start, attachment);
+            history.add(sessionId, text, result.answer());
+            return effective.equals(text) ? result : result.withRewrittenQuestion(effective);
         } catch (ChatFailedException e) {
             throw e;
         } catch (RuntimeException e) {

@@ -57,6 +57,9 @@ class ChatServiceTest {
         final AtomicReference<TextGenerator> fileModel = new AtomicReference<>(
                 (system, user) -> "SUMMARY of: " + user.substring(user.indexOf("<document>") + 11,
                         Math.min(user.length(), user.indexOf("<document>") + 40)));
+        /** Latest message -> standalone message; anything not listed is returned unchanged. */
+        final java.util.Map<String, String> rewrites = new java.util.concurrent.ConcurrentHashMap<>();
+        final java.util.List<String> rewriterPrompts = new java.util.concurrent.CopyOnWriteArrayList<>();
         final AtomicReference<String> repairReply = new AtomicReference<>("{\"status\":\"NOT_FOUND\"}");
         final java.util.concurrent.atomic.AtomicInteger repairCalls = new java.util.concurrent.atomic.AtomicInteger();
         final AtomicReference<String> repairInput = new AtomicReference<>();
@@ -95,7 +98,14 @@ class ChatServiceTest {
                 repairInput.set(user);
                 return repairReply.get();
             });
-            chat = new ChatService(coordinators, ledger, new GroundingVerifier(ledger), repairer, fileLedger);
+            TextGenerator rewriterModel = (system, user) -> {
+                rewriterPrompts.add(user);
+                String latest = user.substring(user.lastIndexOf("Latest message: ") + "Latest message: ".length());
+                return rewrites.getOrDefault(latest, latest);
+            };
+            chat = new ChatService(coordinators, ledger, new GroundingVerifier(ledger), repairer, fileLedger,
+                    new ChatHistory(ChatProperties.defaults()), new FollowUpRewriter(rewriterModel),
+                    ChatProperties.defaults());
             llm.script(this::respond);
         }
 
@@ -112,6 +122,101 @@ class ChatServiceTest {
             }
             return ScriptedLlm.text("unexpected agent");
         }
+    }
+
+    // ---- follow-up questions ----------------------------------------------------------------------
+
+    /** The user text of the coordinator's first model request of the latest turn. */
+    private static String coordinatorInput(Rig rig, int turnIndex) {
+        java.util.List<com.google.adk.models.LlmRequest> routing = rig.llm.requests().stream()
+                .filter(r -> r.tools().containsKey("rag_agent")).toList();
+        com.google.adk.models.LlmRequest request = routing.get(turnIndex);
+        com.google.genai.types.Content last = request.contents().stream()
+                .filter(c -> "user".equals(c.role().orElse(""))).reduce((a, b) -> b).orElseThrow();
+        return last.parts().orElseThrow().get(0).text().orElse("");
+    }
+
+    @Test
+    void followUpPair1_aPronounQuestionReachesTheCoordinatorAsAStandaloneQuestion() {
+        Rig rig = new Rig(i -> 5.0 - i, true);
+        rig.ragFinal.set(GOOD_ANSWER);
+        rig.rewrites.put("Who can use it?", "Who can use the AWS Well-Architected Tool?");
+
+        ChatResult first = rig.chat.chat("tab-1", "What is the AWS Well-Architected Tool?");
+        ChatResult second = rig.chat.chat("tab-1", "Who can use it?");
+
+        assertThat(first.rewrittenQuestion()).isNull();                       // no history, no rewrite call
+        assertThat(rig.rewriterPrompts).hasSize(1);
+        assertThat(rig.rewriterPrompts.get(0)).contains("User: What is the AWS Well-Architected Tool?")
+                .contains("provides a consistent process")                    // the previous answer is shown
+                .endsWith("Latest message: Who can use it?");
+        assertThat(coordinatorInput(rig, 1)).isEqualTo("Who can use the AWS Well-Architected Tool?");
+        assertThat(second.rewrittenQuestion()).isEqualTo("Who can use the AWS Well-Architected Tool?");
+    }
+
+    @Test
+    void followUpPair2_makeItShorterAfterAFileSummaryNamesTheFile() {
+        Rig rig = new Rig(i -> 5.0 - i, true);
+        UploadedFile file = rig.uploads.upload("tab-1", "notes.txt", NOTES);
+        rig.rewrites.put("Make it shorter", "Make the summary of notes.txt shorter");
+        rig.coordinatorTool.set("file_agent");
+
+        rig.chat.chat("tab-1", "Summarize this file", file.id());          // the attachment turn: not rewritten
+        ChatResult second = rig.chat.chat("tab-1", "Make it shorter");
+
+        assertThat(rig.rewriterPrompts).hasSize(1);                           // only the second turn had history
+        assertThat(rig.rewriterPrompts.get(0)).contains("User: Summarize this file")
+                .contains("SUMMARY of: Quarterly notes");                     // the summary is the assistant turn
+        assertThat(second.rewrittenQuestion()).isEqualTo("Make the summary of notes.txt shorter");
+        assertThat(coordinatorInput(rig, 0)).isEqualTo("Make the summary of notes.txt shorter");
+        assertThat(second.route()).isEqualTo("file_agent");
+    }
+
+    @Test
+    void followUpPair3_aTerseFragmentAfterARagAnswerIsExpanded() {
+        Rig rig = new Rig(i -> 5.0 - i, true);
+        rig.ragFinal.set(GOOD_ANSWER);
+        rig.rewrites.put("And the cost one?", "What does the Cost Optimization pillar cover?");
+
+        rig.chat.chat("tab-1", "What pillars does the framework have?");
+        ChatResult second = rig.chat.chat("tab-1", "And the cost one?");
+
+        assertThat(coordinatorInput(rig, 1)).isEqualTo("What does the Cost Optimization pillar cover?");
+        assertThat(second.rewrittenQuestion()).isEqualTo("What does the Cost Optimization pillar cover?");
+    }
+
+    @Test
+    void aStandaloneSecondQuestionIsPassedUnchangedAndNotMarkedAsRewritten() {
+        Rig rig = new Rig(i -> 5.0 - i, true);
+        rig.ragFinal.set(GOOD_ANSWER);
+
+        rig.chat.chat("tab-1", "What is the AWS Well-Architected Tool?");
+        ChatResult second = rig.chat.chat("tab-1", "How do I rotate credentials?");
+
+        assertThat(coordinatorInput(rig, 1)).isEqualTo("How do I rotate credentials?");
+        assertThat(second.rewrittenQuestion()).isNull();
+    }
+
+    @Test
+    void historyIsPerSessionSoAnotherTabNeverSeesIt() {
+        Rig rig = new Rig(i -> 5.0 - i, true);
+        rig.ragFinal.set(GOOD_ANSWER);
+
+        rig.chat.chat("tab-1", "What is the AWS Well-Architected Tool?");
+        rig.chat.chat("tab-2", "Who can use it?");
+
+        assertThat(rig.rewriterPrompts).isEmpty();                            // tab-2 has no history
+    }
+
+    @Test
+    void aFailingRewriterNeverBlocksTheTurn() {
+        FollowUpRewriter failing = new FollowUpRewriter((system, user) -> {
+            throw new IllegalStateException("quota exhausted");
+        });
+
+        String out = failing.rewrite(java.util.List.of(new ChatHistory.Turn("q", "a")), "Who can use it?");
+
+        assertThat(out).isEqualTo("Who can use it?");
     }
 
     // ---- the file agent ---------------------------------------------------------------------------
@@ -401,7 +506,8 @@ class ChatServiceTest {
         ChatService chat = new ChatService(coordinators, ledger, new GroundingVerifier(ledger),
                 new MalformedAnswerRepair((system, user) -> {
                     throw new IllegalStateException("no repair expected");
-                }), new FileSummaryLedger());
+                }), new FileSummaryLedger(), new ChatHistory(ChatProperties.defaults()),
+                new FollowUpRewriter((system, user) -> user), ChatProperties.defaults());
         llm.script(req -> req.tools().containsKey("prose_agent")
                 ? ScriptedLlm.call("prose_agent", Map.of("request", "q"))      // the coordinator picks the other agent
                 : ScriptedLlm.text("Lambda allows 1,000 concurrent executions, unverified."));
