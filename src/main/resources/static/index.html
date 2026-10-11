@@ -1,0 +1,531 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Agent Framework</title>
+<style>
+  :root {
+    --bg: #f6f7f9; --panel: #ffffff; --text: #1c2330; --muted: #5d6778; --line: #dfe3ea;
+    --accent: #2457d6; --accent-text: #ffffff; --user: #e8eefc; --ok: #19734a; --warn: #8a5a00; --bad: #b3261e;
+    --chip: #eef1f6; --code: #f1f3f7;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #12151b; --panel: #1b2029; --text: #e6e9ef; --muted: #9aa4b5; --line: #2c3340;
+      --accent: #6c93ff; --accent-text: #0b1020; --user: #23304f; --ok: #5fd39a; --warn: #f0b84a; --bad: #ff8a80;
+      --chip: #262c38; --code: #232936;
+    }
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  .app { display: grid; grid-template-columns: minmax(0, 1fr) 320px; height: 100%; }
+  @media (max-width: 860px) { .app { grid-template-columns: minmax(0, 1fr); } .side { display: none; } .side.open { display: block; position: fixed; inset: 0; z-index: 5; } }
+  .main { display: flex; flex-direction: column; min-height: 0; }
+  header { display: flex; align-items: center; gap: 12px; padding: 10px 16px; border-bottom: 1px solid var(--line); background: var(--panel); }
+  header h1 { font-size: 16px; margin: 0; flex: 1; }
+  header button { font: inherit; }
+  #log { flex: 1; overflow-y: auto; padding: 16px; }
+  .msg { max-width: 860px; margin: 0 auto 16px; }
+  .bubble { padding: 10px 14px; border-radius: 12px; white-space: pre-wrap; overflow-wrap: anywhere; }
+  .user .bubble { background: var(--user); margin-left: 15%; }
+  .bot .bubble { background: var(--panel); border: 1px solid var(--line); }
+  .label { display: inline-block; font-size: 12px; font-weight: 600; padding: 2px 8px; border-radius: 999px; background: var(--chip); color: var(--muted); margin-bottom: 6px; }
+  .label.answer { color: var(--ok); } .label.summary, .label.notice { color: var(--warn); } .label.not_found { color: var(--muted); }
+  .rewritten { font-size: 12px; color: var(--muted); margin-top: 6px; }
+  details { margin-top: 8px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); }
+  details > summary { cursor: pointer; padding: 6px 10px; color: var(--muted); font-size: 13px; }
+  details > .body { padding: 6px 12px 12px; font-size: 13px; }
+  .src { margin: 8px 0; padding-left: 10px; border-left: 3px solid var(--line); }
+  .src .where { font-weight: 600; }
+  .src q { display: block; color: var(--muted); quotes: none; overflow-wrap: anywhere; }
+  table { border-collapse: collapse; width: 100%; font-size: 12px; margin: 6px 0; }
+  th, td { text-align: left; padding: 3px 6px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  tr.kept td { background: color-mix(in srgb, var(--ok) 12%, transparent); }
+  tr.floor td { border-top: 2px dashed var(--bad); }
+  .kv { display: flex; flex-wrap: wrap; gap: 4px 14px; color: var(--muted); font-size: 12px; margin: 4px 0; }
+  .stages { list-style: none; margin: 4px 0; padding: 0; font-size: 12px; color: var(--muted); }
+  .stages li { padding: 1px 0; }
+  .progress { max-width: 860px; margin: 0 auto 16px; color: var(--muted); }
+  .progress ul { list-style: none; margin: 4px 0 0; padding: 0; font-size: 13px; }
+  .progress li.done { color: var(--text); }
+  .progress li.now::after { content: " …"; }
+  .error { max-width: 860px; margin: 0 auto 16px; padding: 10px 14px; border: 1px solid var(--bad); color: var(--bad); border-radius: 10px; background: var(--panel); }
+  footer { border-top: 1px solid var(--line); background: var(--panel); padding: 10px 16px; }
+  .composer { max-width: 860px; margin: 0 auto; }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 6px; }
+  .chip { background: var(--chip); border-radius: 999px; padding: 2px 10px; font-size: 12px; display: inline-flex; gap: 6px; align-items: center; }
+  .chip button { border: 0; background: none; color: var(--muted); cursor: pointer; padding: 0; font-size: 14px; }
+  .row { display: flex; gap: 8px; align-items: flex-end; }
+  textarea { flex: 1; font: inherit; color: var(--text); background: var(--bg); border: 1px solid var(--line); border-radius: 10px; padding: 8px 10px; resize: vertical; min-height: 44px; max-height: 200px; }
+  button.btn { font: inherit; border: 1px solid var(--line); background: var(--panel); color: var(--text); border-radius: 10px; padding: 8px 12px; cursor: pointer; }
+  button.primary { background: var(--accent); color: var(--accent-text); border-color: var(--accent); font-weight: 600; }
+  button:disabled { opacity: .5; cursor: default; }
+  .side { border-left: 1px solid var(--line); background: var(--panel); overflow-y: auto; padding: 14px; }
+  .side h2 { font-size: 14px; margin: 0 0 8px; }
+  .doc { display: flex; justify-content: space-between; gap: 8px; font-size: 13px; padding: 3px 0; border-bottom: 1px solid var(--line); }
+  .doc span:last-child { color: var(--muted); white-space: nowrap; }
+  .bar { height: 8px; border-radius: 4px; background: var(--chip); overflow: hidden; margin: 6px 0; }
+  .bar > div { height: 100%; width: 0; background: var(--accent); transition: width .2s; }
+  .note { color: var(--muted); font-size: 12px; }
+  .only-mobile { display: none; margin: 0 0 8px; }
+  @media (max-width: 860px) { .only-mobile { display: block; } }
+  dialog { border: 1px solid var(--line); border-radius: 12px; background: var(--panel); color: var(--text); width: min(560px, 92vw); }
+  dialog::backdrop { background: rgba(0,0,0,.4); }
+  .empty { max-width: 860px; margin: 40px auto; color: var(--muted); }
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+</style>
+</head>
+<body>
+<div class="app">
+  <div class="main">
+    <header>
+      <h1>Agent Framework</h1>
+      <button class="btn" id="toggleSide" type="button">Knowledge base</button>
+      <button class="btn" id="newChat" type="button" title="Start a new conversation">New chat</button>
+    </header>
+    <div id="log" aria-live="polite">
+      <div class="empty" id="empty">
+        <p>Ask about the reference documents, or attach a file and ask for a summary.</p>
+        <p class="note">Answers from the documents carry their sources and are checked quote by quote. Summaries of your own files are labelled and are not quote-checked.</p>
+      </div>
+    </div>
+    <footer>
+      <div class="composer">
+        <div class="chips" id="chips"></div>
+        <div class="row">
+          <button class="btn" id="attach" type="button" title="Attach a PDF, DOCX or text file">Attach</button>
+          <button class="btn" id="paste" type="button" title="Paste text as a file">Paste text</button>
+          <textarea id="input" rows="2" placeholder="Ask a question…  (Enter sends, Shift+Enter adds a line)" aria-label="Message"></textarea>
+          <button class="btn primary" id="send" type="button">Send</button>
+        </div>
+        <input type="file" id="fileInput" hidden accept=".pdf,.docx,.txt,.md,text/plain,application/pdf">
+      </div>
+    </footer>
+  </div>
+
+  <aside class="side" id="side" aria-label="Knowledge base">
+    <p class="only-mobile"><button class="btn" id="closeSide" type="button">Close</button></p>
+    <h2>Knowledge base</h2>
+    <p class="note">PDFs the assistant answers from. Added documents become searchable for everyone.</p>
+    <div id="docs"></div>
+    <p><button class="btn" id="addDoc" type="button">Add a PDF…</button></p>
+    <input type="file" id="docInput" hidden accept=".pdf,application/pdf">
+    <div id="kbStatus" class="note" aria-live="polite"></div>
+    <div class="bar" id="kbBar" hidden><div></div></div>
+    <hr style="border:0;border-top:1px solid var(--line);margin:14px 0">
+    <h2>Connected tools</h2>
+    <p class="note">MCP servers are configured on the next day of the build.</p>
+  </aside>
+</div>
+
+<dialog id="pasteDialog">
+  <form method="dialog">
+    <h2 style="margin-top:0;font-size:16px">Paste text</h2>
+    <p class="note">It is stored like an uploaded file for this conversation and can be summarized.</p>
+    <textarea id="pasteText" rows="10" style="width:100%" aria-label="Text to attach"></textarea>
+    <p style="text-align:right;margin-bottom:0">
+      <button class="btn" value="cancel">Cancel</button>
+      <button class="btn primary" value="ok" id="pasteOk">Attach</button>
+    </p>
+  </form>
+</dialog>
+
+<script>
+(function () {
+  'use strict';
+
+  // ---- state -----------------------------------------------------------------------------------
+  var SESSION_KEY = 'agentfw.session';
+  var sessionId = null;
+  try { sessionId = sessionStorage.getItem(SESSION_KEY); } catch (e) { /* storage blocked: session lives in memory */ }
+  if (!sessionId) {
+    sessionId = (window.crypto && crypto.randomUUID) ? crypto.randomUUID() : String(Date.now()) + Math.random().toString(16).slice(2);
+    try { sessionStorage.setItem(SESSION_KEY, sessionId); } catch (e) { /* ignore */ }
+  }
+  var attached = null;      // {id, name} the file chip shows; sent with the next message
+  var busy = false;
+
+  var $ = function (id) { return document.getElementById(id); };
+  var log = $('log'), input = $('input'), sendBtn = $('send'), chips = $('chips');
+
+  var STAGE_LABEL = {
+    understanding: 'Reading your follow-up', routing: 'Choosing an agent', searching: 'Searching the documents',
+    reranking: 'Ranking the passages', answering: 'Writing the answer', repairing: 'Fixing the answer format',
+    verifying: 'Checking every quote', summarizing: 'Summarizing the file', combining: 'Combining the parts',
+    condensing: 'Condensing the parts'
+  };
+
+  // ---- small DOM helpers (text nodes only, never markup) --------------------------------------------
+  function el(tag, props, children) {
+    var n = document.createElement(tag);
+    if (props) {
+      Object.keys(props).forEach(function (k) {
+        if (k === 'class') n.className = props[k];
+        else if (k === 'text') n.textContent = props[k];
+        else n.setAttribute(k, props[k]);
+      });
+    }
+    (children || []).forEach(function (c) { if (c) n.appendChild(typeof c === 'string' ? document.createTextNode(c) : c); });
+    return n;
+  }
+  function scrollDown() { log.scrollTop = log.scrollHeight; }
+  function fmt(n, d) { return (n === null || n === undefined) ? '–' : Number(n).toFixed(d === undefined ? 2 : d); }
+  function ms(n) { return n < 1000 ? n + ' ms' : (n / 1000).toFixed(1) + ' s'; }
+
+  // ---- API -------------------------------------------------------------------------------------
+  function apiError(res) {
+    return res.text().then(function (t) {
+      var body = null;
+      try { body = JSON.parse(t); } catch (e) { /* not JSON */ }
+      var err = new Error(body && body.message ? body.message : 'The server returned an error (' + res.status + ').');
+      err.code = body && body.code;
+      return err;
+    });
+  }
+
+  /** POST and read a server-sent event stream; calls onEvent(name, data) for every event. */
+  function stream(url, init, onEvent) {
+    return fetch(url, init).then(function (res) {
+      if (!res.ok) return apiError(res).then(function (e) { throw e; });
+      var reader = res.body.getReader();
+      var decoder = new TextDecoder();
+      var buf = '';
+      function pump() {
+        return reader.read().then(function (chunk) {
+          if (chunk.done) return;
+          buf += decoder.decode(chunk.value, { stream: true });
+          var i;
+          while ((i = buf.indexOf('\n\n')) >= 0) {
+            var raw = buf.slice(0, i); buf = buf.slice(i + 2);
+            var name = 'message', data = [];
+            raw.split('\n').forEach(function (line) {
+              if (line.indexOf('event:') === 0) name = line.slice(6).trim();
+              else if (line.indexOf('data:') === 0) data.push(line.slice(5).trim());
+            });
+            if (data.length) {
+              try { onEvent(name, JSON.parse(data.join('\n'))); } catch (e) { /* ignore a malformed event */ }
+            }
+          }
+          return pump();
+        });
+      }
+      return pump();
+    });
+  }
+
+  // ---- rendering -------------------------------------------------------------------------------
+  function addUser(text, fileName) {
+    $('empty') && $('empty').remove();
+    var body = el('div', { class: 'bubble', text: text });
+    if (fileName) body.appendChild(el('div', { class: 'note', text: '📎 ' + fileName }));
+    log.appendChild(el('div', { class: 'msg user' }, [body]));
+    scrollDown();
+  }
+
+  function addError(message) {
+    log.appendChild(el('div', { class: 'error', role: 'alert', text: message }));
+    scrollDown();
+  }
+
+  var LABELS = {
+    answer: 'From the reference documents · every quote checked',
+    summary: 'Summary of your file · not quote-checked',
+    not_found: 'Not in the reference documents',
+    notice: 'Notice'
+  };
+
+  function addAnswer(r) {
+    var label = LABELS[r.kind] || r.kind;
+    if (r.kind === 'summary' && r.file) label = 'Summary of ' + r.file.name + ' · not quote-checked';
+    var bubble = el('div', { class: 'bubble' }, [
+      el('span', { class: 'label ' + r.kind, text: label }), el('br'), document.createTextNode(r.answer)
+    ]);
+    var wrap = el('div', { class: 'msg bot' }, [bubble]);
+    if (r.rewrittenQuestion) {
+      wrap.appendChild(el('div', { class: 'rewritten', text: 'Understood as: ' + r.rewrittenQuestion }));
+    }
+    if (r.sources && r.sources.length) wrap.appendChild(sourcesBlock(r.sources));
+    wrap.appendChild(traceBlock(r));
+    log.appendChild(wrap);
+    scrollDown();
+  }
+
+  function sourcesBlock(sources) {
+    var body = el('div', { class: 'body' });
+    sources.forEach(function (s) {
+      body.appendChild(el('div', { class: 'src' }, [
+        el('div', { class: 'where', text: s.file + ', page ' + s.page }),
+        el('q', { text: s.quote })
+      ]));
+    });
+    var d = el('details', null, [el('summary', { text: 'Sources (' + sources.length + ')' }), body]);
+    return d;
+  }
+
+  function traceBlock(r) {
+    var body = el('div', { class: 'body' });
+    body.appendChild(el('div', { class: 'kv' }, [
+      el('span', { text: 'route: ' + r.route }),
+      el('span', { text: 'tools: ' + (r.toolCalls.length ? r.toolCalls.join(', ') : 'none') }),
+      el('span', { text: 'total: ' + ms(r.totalMillis) }),
+      el('span', { text: 'grounded: ' + r.grounded }),
+      r.verification && r.verification.repaired ? el('span', { text: 'answer format repaired once' }) : null
+    ]));
+    if (r.verification && r.verification.problems && r.verification.problems.length) {
+      body.appendChild(el('div', { class: 'kv' }, [el('span', { text: 'checks: ' + r.verification.problems.join('; ') })]));
+    }
+    if (r.stages && r.stages.length) {
+      var ul = el('ul', { class: 'stages' });
+      r.stages.forEach(function (s) {
+        ul.appendChild(el('li', { text: '+' + ms(s.elapsedMillis) + '  ' + (STAGE_LABEL[s.stage] || s.stage) + (s.detail ? ' ' + s.detail : '') }));
+      });
+      body.appendChild(ul);
+    }
+    if (r.file) {
+      body.appendChild(el('div', { class: 'kv' }, [
+        el('span', { text: 'file: ' + r.file.name }), el('span', { text: r.file.chars + ' characters' }),
+        el('span', { text: r.file.strategy === 'MAP_REDUCE' ? 'map-reduce, ' + r.file.segments + ' parts' : 'single pass' }),
+        el('span', { text: r.file.modelCalls + ' model calls' }), el('span', { text: ms(r.file.millis) })
+      ]));
+    }
+    (r.retrievals || []).forEach(function (t, i) { body.appendChild(retrievalBlock(t, i + 1)); });
+    return el('details', null, [el('summary', { text: 'How this answer was produced' }), body]);
+  }
+
+  function retrievalBlock(t, n) {
+    var box = el('div');
+    box.appendChild(el('div', { class: 'where', style: 'font-weight:600;margin-top:8px', text: 'Search ' + n + ': ' + t.query }));
+    var stageMs = Object.keys(t.search.stageMillis || {}).map(function (k) { return k + ' ' + ms(t.search.stageMillis[k]); });
+    box.appendChild(el('div', { class: 'kv' }, [
+      el('span', { text: 'vector hits ' + t.search.vectorHits }), el('span', { text: 'text (BM25) hits ' + t.search.textHits }),
+      el('span', { text: 'union ' + t.search.unionSize }), el('span', { text: 'fusion ' + t.search.strategy }),
+      el('span', { text: 'embed ' + ms(t.embedMillis) }), el('span', { text: stageMs.join(', ') }),
+      el('span', { text: 'rerank ' + ms(t.rerank.millis) + ' (' + t.rerank.pairsScored + ' pairs' + (t.rerank.truncatedPairs ? ', ' + t.rerank.truncatedPairs + ' truncated' : '') + ')' })
+    ]));
+    var g = t.grounding;
+    box.appendChild(el('div', { class: 'kv' }, [
+      el('span', { text: 'decision: ' + g.decision }), el('span', { text: 'top score ' + fmt(g.topScore) }),
+      el('span', { text: 'floor ' + fmt(g.threshold) }), el('span', { text: 'margin ' + fmt(g.margin) }),
+      g.highConfidence ? el('span', { text: 'high confidence' }) : null
+    ]));
+    box.appendChild(rerankTable(t));
+    box.appendChild(fusedTable(t));
+    return box;
+  }
+
+  function rerankTable(t) {
+    var floor = t.grounding.threshold;
+    var rows = t.rerank.scored || [];
+    var table = el('table');
+    table.appendChild(el('thead', null, [el('tr', null, ['#', 'score', 'document', 'page', 'fused rank', 'passage'].map(function (h) { return el('th', { text: h }); }))]));
+    var tb = el('tbody');
+    var floorDrawn = false;
+    rows.forEach(function (s) {
+      var cls = s.rerankRank <= t.rerank.kept ? 'kept' : '';
+      if (!floorDrawn && floor !== null && floor !== undefined && s.rerankScore < floor) { cls += ' floor'; floorDrawn = true; }
+      tb.appendChild(el('tr', { class: cls }, [
+        el('td', { text: String(s.rerankRank) }), el('td', { text: fmt(s.rerankScore) }), el('td', { text: s.file }),
+        el('td', { text: String(s.page) }), el('td', { text: String(s.fusedRank) }), el('td', { text: s.snippet })
+      ]));
+    });
+    table.appendChild(tb);
+    return el('details', null, [el('summary', { text: 'Reranked passages (' + rows.length + ', top ' + t.rerank.kept + ' sent to the model)' }), el('div', { class: 'body' }, [table])]);
+  }
+
+  function fusedTable(t) {
+    var rows = t.search.fusedTop || [];
+    var table = el('table');
+    table.appendChild(el('thead', null, [el('tr', null, ['#', 'fused', 'vector rank', 'text rank', 'document', 'page'].map(function (h) { return el('th', { text: h }); }))]));
+    var tb = el('tbody');
+    rows.forEach(function (c) {
+      tb.appendChild(el('tr', null, [
+        el('td', { text: String(c.fusedRank) }), el('td', { text: fmt(c.fusedScore, 4) }),
+        el('td', { text: c.vectorRank === null ? '–' : String(c.vectorRank) }), el('td', { text: c.textRank === null ? '–' : String(c.textRank) }),
+        el('td', { text: c.file }), el('td', { text: String(c.page) })
+      ]));
+    });
+    table.appendChild(tb);
+    return el('details', null, [el('summary', { text: 'Fused candidates (top ' + rows.length + ')' }), el('div', { class: 'body' }, [table])]);
+  }
+
+  // ---- progress while a turn runs --------------------------------------------------------------
+  function progressBox() {
+    var ul = el('ul');
+    var box = el('div', { class: 'progress', role: 'status' }, [el('div', { text: 'Working…' }), ul]);
+    log.appendChild(box);
+    scrollDown();
+    return {
+      stage: function (s) {
+        var prev = ul.lastChild;
+        if (prev) prev.className = 'done';
+        var label = (STAGE_LABEL[s.stage] || s.stage) + (s.detail ? ' ' + s.detail : '');
+        var li = el('li', { class: 'now', text: label + '  (' + ms(s.elapsedMillis) + ')' });
+        ul.appendChild(li);
+        scrollDown();
+      },
+      remove: function () { box.remove(); }
+    };
+  }
+
+  // ---- sending ---------------------------------------------------------------------------------
+  function setBusy(b) {
+    busy = b;
+    sendBtn.disabled = b;
+    $('attach').disabled = b;
+    $('paste').disabled = b;
+  }
+
+  function send() {
+    var text = input.value.trim();
+    if (busy || (!text && !attached)) return;
+    var file = attached;
+    addUser(text || 'Summarize this file.', file && file.name);
+    input.value = '';
+    clearAttachment();
+    setBusy(true);
+    var progress = progressBox();
+    var result = null, error = null;
+    stream('/api/chat/stream', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Accept': 'text/event-stream' },
+      body: JSON.stringify({ sessionId: sessionId, message: text, fileId: file ? file.id : null })
+    }, function (name, data) {
+      if (name === 'stage') progress.stage(data);
+      else if (name === 'result') result = data;
+      else if (name === 'error') error = data.message;
+    }).catch(function (e) {
+      error = e.message || 'The request failed.';
+    }).then(function () {
+      progress.remove();
+      if (result) addAnswer(result);
+      else addError(error || 'No answer was received. Please try again.');
+      setBusy(false);
+      input.focus();
+    });
+  }
+
+  // ---- attachments -----------------------------------------------------------------------------
+  function showAttachment() {
+    chips.textContent = '';
+    if (!attached) return;
+    var x = el('button', { type: 'button', 'aria-label': 'Remove attachment', text: '×' });
+    x.addEventListener('click', clearAttachment);
+    chips.appendChild(el('span', { class: 'chip' }, [document.createTextNode('📎 ' + attached.name), x]));
+  }
+  function clearAttachment() { attached = null; showAttachment(); }
+
+  function upload(form, label) {
+    form.append('sessionId', sessionId);
+    chips.textContent = '';
+    chips.appendChild(el('span', { class: 'chip', text: 'Uploading ' + label + '…' }));
+    return fetch('/api/files', { method: 'POST', body: form }).then(function (res) {
+      if (!res.ok) return apiError(res).then(function (e) { throw e; });
+      return res.json();
+    }).then(function (f) {
+      attached = { id: f.id, name: f.name };
+      showAttachment();
+      input.focus();
+    }).catch(function (e) {
+      clearAttachment();
+      addError(e.message);
+    });
+  }
+
+  $('attach').addEventListener('click', function () { $('fileInput').click(); });
+  $('fileInput').addEventListener('change', function (ev) {
+    var f = ev.target.files[0];
+    ev.target.value = '';
+    if (!f) return;
+    var form = new FormData();
+    form.append('file', f, f.name);
+    upload(form, f.name);
+  });
+  $('paste').addEventListener('click', function () { $('pasteText').value = ''; $('pasteDialog').showModal(); $('pasteText').focus(); });
+  $('pasteDialog').addEventListener('close', function () {
+    var d = $('pasteDialog');
+    if (d.returnValue !== 'ok') return;
+    var text = $('pasteText').value;
+    if (!text.trim()) return;
+    var form = new FormData();
+    form.append('text', text);
+    upload(form, 'pasted text');
+  });
+
+  // ---- knowledge base --------------------------------------------------------------------------
+  function loadDocs() {
+    fetch('/api/kb/documents').then(function (r) { return r.ok ? r.json() : []; }).then(function (docs) {
+      var box = $('docs');
+      box.textContent = '';
+      if (!docs.length) { box.appendChild(el('p', { class: 'note', text: 'No documents yet.' })); return; }
+      docs.forEach(function (d) {
+        box.appendChild(el('div', { class: 'doc' }, [
+          el('span', { text: d.fileName }), el('span', { text: d.indexed ? d.chunks + ' passages' : 'not indexed' })
+        ]));
+      });
+    }).catch(function () { /* the list is a convenience */ });
+  }
+
+  function addDocument(file, replace) {
+    var status = $('kbStatus'), bar = $('kbBar');
+    var form = new FormData();
+    form.append('file', file, file.name);
+    if (replace) form.append('replace', 'true');
+    status.textContent = 'Checking ' + file.name + '…';
+    bar.hidden = false; bar.firstChild.style.width = '5%';
+    var finished = false;
+    stream('/api/kb/documents', { method: 'POST', headers: { 'Accept': 'text/event-stream' }, body: form }, function (name, d) {
+      if (name === 'stage') {
+        var pct = d.total > 0 ? Math.round(100 * d.done / d.total) : 0;
+        if (d.stage === 'parsing') { status.textContent = 'Reading the PDF…'; pct = 10; }
+        else if (d.stage === 'chunking') { status.textContent = 'Splitting into passages…'; pct = 20; }
+        else if (d.stage === 'embedding') { status.textContent = 'Embedding passages ' + d.done + ' / ' + d.total; pct = 20 + Math.round(0.7 * pct); }
+        else if (d.stage === 'storing') { status.textContent = 'Saving…'; pct = 95; }
+        bar.firstChild.style.width = pct + '%';
+      } else if (name === 'result') {
+        finished = true;
+        bar.firstChild.style.width = '100%';
+        status.textContent = d.status === 'UNCHANGED' ? d.fileName + ' was already up to date.'
+          : d.fileName + ' added: ' + d.chunks + ' passages from ' + d.pages + ' pages. Ready to search.';
+        loadDocs();
+      } else if (name === 'error') {
+        finished = true;
+        status.textContent = d.message;
+      }
+    }).catch(function (e) {
+      finished = true;
+      if (e.code === 'EXISTS' && window.confirm(e.message + '\n\nReplace the existing document?')) {
+        addDocument(file, true);
+        return;
+      }
+      status.textContent = e.message;
+    }).then(function () {
+      if (finished) setTimeout(function () { bar.hidden = true; }, 1500);
+    });
+  }
+
+  $('addDoc').addEventListener('click', function () { $('docInput').click(); });
+  $('docInput').addEventListener('change', function (ev) {
+    var f = ev.target.files[0];
+    ev.target.value = '';
+    if (f) addDocument(f, false);
+  });
+  $('toggleSide').addEventListener('click', function () { $('side').classList.toggle('open'); });
+  $('closeSide').addEventListener('click', function () { $('side').classList.remove('open'); });
+
+  // ---- misc ------------------------------------------------------------------------------------
+  sendBtn.addEventListener('click', send);
+  input.addEventListener('keydown', function (e) {
+    if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); send(); }
+  });
+  $('newChat').addEventListener('click', function () {
+    try { sessionStorage.removeItem(SESSION_KEY); } catch (e) { /* ignore */ }
+    location.reload();
+  });
+  loadDocs();
+  input.focus();
+})();
+</script>
+</body>
+</html>

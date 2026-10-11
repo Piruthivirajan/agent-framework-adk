@@ -87,7 +87,7 @@ Decisions (user): file agent shape decided by the step 0 spike; **two paths** to
 - [x] 5. Follow-up rewriting from chat history (3 follow-up pairs in tests)
 - [x] 6. API: `/api/chat`, `/api/files`, error handler; SSE stage events
 - [x] 7. Knowledge base: `POST /api/kb/documents`, single-file ingestion with progress, no-text-layer rejection
-- [ ] 8. UI: chat, attach/paste, sources, trace panel, progress, KB upload; verified in the browser on A, B, C
+- [x] 8. UI: chat, attach/paste, sources, trace panel, progress, KB upload; verified in the browser on A, B, C
 - [ ] 9. Scenario C measurement (small TXT, 20-page PDF, the 300+ page PDF), final limits from the numbers
 
 ## Watch list
@@ -97,6 +97,14 @@ Decisions (user): file agent shape decided by the step 0 spike; **two paths** to
 ## Log
 
 <!-- Newest first. One entry per task: date, what was built, what was verified. -->
+
+### 2026-10-11: Day 5 step 8, the chat page (`src/main/resources/static/index.html`)
+- **One static page, no framework, no build step.** Conversation with attach (PDF, DOCX, text) and paste-text, an attachment chip, live progress while a turn runs (the stage events of step 6: "Choosing an agent", "Searching the documents", "Ranking the passages", "Writing the answer", "Checking every quote", "Summarizing the file" with parts), then the answer with a label that says what kind of answer it is ("From the reference documents · every quote checked", "Summary of notes.txt · not quote-checked", "Not in the reference documents", "Notice").
+- **Sources** are an expandable list (file, page, the verbatim quote), never inline. **"How this answer was produced"** is the trace panel under every answer: route, tools, total, grounded, the stage timeline with times, the rewritten follow-up ("Understood as: ..."), and per search: query, vector hits, BM25 hits, union, fusion, embed / search / rerank times, truncated pairs, the grounding decision with top score, floor and margin, the reranked passages (the 5 sent to the model highlighted, a dashed floor line when scores fall below it) and the fused top 20 with vector and text ranks.
+- **Knowledge base side panel:** the list of documents with passage counts, "Add a PDF" with a progress bar driven by the ingestion stream, the server's sentence for a scan or a name collision (a confirm to replace). MCP is a placeholder until Day 6.
+- **Safe by construction:** every piece of model or document text is set with `textContent`; a test fails if `innerHTML`, `eval` or `document.write` appear in the page. Errors are shown as a banner with the API's sentence. One chat per browser tab (session id in `sessionStorage`; "New chat" starts a new one). Works at phone width; follows the system light or dark theme; keyboard: Enter sends, Shift+Enter adds a line.
+- **Checked in the browser pane against the running application** (real model): answer with sources and trace (5 kept rows, stages with timings), attachment turn labelled as a summary, unsupported file shows the server's message and clears the chip, knowledge base add shows `Embedding passages 0 / 1` then "added: 1 passages from 1 pages. Ready to search.", a scan shows the no-text-layer message, narrow viewport has no horizontal scroll and the side panel opens and closes. The test document was removed from the database afterwards (10 documents). Not done: a screen reader pass.
+- Verified: BUILD SUCCESS, 292 tests.
 
 ### 2026-10-11: Day 5 step 7, "add to knowledge base" (`POST /api/kb/documents`)
 - **Separate from the chat attachment:** an attachment is read by the file agent for one session and expires; a knowledge base document is chunked, embedded and searchable by the RAG agent. `KnowledgeBaseService` saves the PDF into the corpus folder and runs the existing idempotent `IngestionJob` for that one file (`IngestionJob.ingestFile`, with progress `parsing`, `chunking`, `embedding done/total`, `storing`; the single file is embedded in slices of 16 so progress is visible, the corpus job still embeds in one call).
