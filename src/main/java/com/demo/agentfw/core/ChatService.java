@@ -22,6 +22,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.function.Consumer;
 
 /**
  * One chat turn, end to end. The coordinator model only routes; what the user sees is decided here
@@ -56,10 +57,14 @@ public class ChatService {
     private final ChatHistory history;
     private final FollowUpRewriter rewriter;
     private final ChatProperties chatProps;
+    private final TurnProgress progress;
+    private final Object[] sessionLocks = newLocks(64);
 
+    @org.springframework.beans.factory.annotation.Autowired
     public ChatService(CoordinatorFactory coordinators, RetrievalLedger ledger, GroundingVerifier verifier,
                        MalformedAnswerRepair repair, FileSummaryLedger fileLedger, ChatHistory history,
-                       FollowUpRewriter rewriter, ChatProperties chatProps) {
+                       FollowUpRewriter rewriter, ChatProperties chatProps, TurnProgress progress) {
+        this.progress = progress;
         this.coordinators = coordinators;
         this.ledger = ledger;
         this.verifier = verifier;
@@ -77,6 +82,21 @@ public class ChatService {
         }
     }
 
+    /** Without a progress listener (tests, the end-to-end runner). */
+    public ChatService(CoordinatorFactory coordinators, RetrievalLedger ledger, GroundingVerifier verifier,
+                       MalformedAnswerRepair repair, FileSummaryLedger fileLedger, ChatHistory history,
+                       FollowUpRewriter rewriter, ChatProperties chatProps) {
+        this(coordinators, ledger, verifier, repair, fileLedger, history, rewriter, chatProps, new TurnProgress());
+    }
+
+    private static Object[] newLocks(int n) {
+        Object[] locks = new Object[n];
+        for (int i = 0; i < n; i++) {
+            locks[i] = new Object();
+        }
+        return locks;
+    }
+
     /** A text-only turn: the coordinator model chooses the agent. */
     public ChatResult chat(String sessionId, String text) {
         return chat(sessionId, text, null);
@@ -87,16 +107,35 @@ public class ChatService {
      * coordinator model call is made; without it the coordinator model routes the text.
      */
     public ChatResult chat(String sessionId, String text, String fileId) {
+        return chat(sessionId, text, fileId, null);
+    }
+
+    /**
+     * Same, reporting each stage as it starts to {@code listener} (may be null). Turns of one session
+     * run one at a time, so a double click cannot interleave two turns in the same ADK session.
+     */
+    public ChatResult chat(String sessionId, String text, String fileId, Consumer<StageEvent> listener) {
+        synchronized (sessionLocks[Math.floorMod(sessionId.hashCode(), sessionLocks.length)]) {
+            return run(sessionId, text, fileId, listener);
+        }
+    }
+
+    private ChatResult run(String sessionId, String text, String fileId, Consumer<StageEvent> listener) {
         long start = System.nanoTime();
         String requestId = UUID.randomUUID().toString();
         boolean attachment = fileId != null && !fileId.isBlank();
+        progress.register(requestId, listener);
         try {
             InMemoryRunner runner = attachment ? coordinators.agentRunner(FileAgentPlugin.NAME)
                     : coordinators.runner();
             ensureSession(runner, sessionId);
             // a follow-up is made standalone before routing; an attachment's text is an instruction, not a question
-            String effective = attachment || !chatProps.rewriteFollowUps() ? text
-                    : rewriter.rewrite(history.recent(sessionId), text);
+            boolean rewrite = !attachment && chatProps.rewriteFollowUps()
+                    && !history.recent(sessionId).isEmpty();
+            if (rewrite) {
+                progress.emit(requestId, "understanding", "");
+            }
+            String effective = rewrite ? rewriter.rewrite(history.recent(sessionId), text) : text;
             if (!effective.equals(text)) {
                 log.info("chat request={} follow-up rewritten", requestId);
             }
@@ -106,11 +145,15 @@ public class ChatService {
             if (attachment) {
                 state.put(TurnState.FILE_ID, fileId);
             }
+            if (!attachment) {
+                progress.emit(requestId, "routing", "");
+            }
             List<Event> events = runner.runAsync(USER_ID, sessionId, Content.fromParts(Part.fromText(effective)),
                             coordinators.runConfig(), state)
                     .toList().blockingGet();
             ChatResult result = decide(events, requestId, start, attachment);
             history.add(sessionId, text, result.answer());
+            result = result.withStages(progress.snapshot(requestId));
             return effective.equals(text) ? result : result.withRewrittenQuestion(effective);
         } catch (ChatFailedException e) {
             throw e;
@@ -120,6 +163,7 @@ public class ChatService {
         } finally {
             ledger.clear(requestId);
             fileLedger.clear(requestId);
+            progress.unregister(requestId);
         }
     }
 
@@ -149,6 +193,7 @@ public class ChatService {
             boolean repaired = false;
             if (verifier.isMalformedJson(output)) {
                 // the one retry: only for output that is not the JSON object at all
+                progress.emit(requestId, "repairing", "");
                 Optional<String> fixed = repair.repair(output);
                 log.info("chat request={} malformed model output, repair {}", requestId,
                         fixed.isPresent() ? "returned text" : "failed");
@@ -157,6 +202,7 @@ public class ChatService {
                     repaired = true;
                 }
             }
+            progress.emit(requestId, "verifying", "");
             GroundingVerifier.Verified v = verifier.verify(output, requestId);
             result = new ChatResult(v.answer(), RagAgentPlugin.NAME, v.grounded(), v.sources(), traces,
                     new ChatResult.Verification(v.problems(), v.modelSaidNotFound(), repaired), toolCalls, output,

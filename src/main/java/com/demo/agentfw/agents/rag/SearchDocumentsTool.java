@@ -1,5 +1,6 @@
 package com.demo.agentfw.agents.rag;
 
+import com.demo.agentfw.core.TurnProgress;
 import com.demo.agentfw.retrieval.GroundingDecision;
 import com.demo.agentfw.retrieval.RetrievalResult;
 import com.demo.agentfw.retrieval.RetrievalService;
@@ -33,11 +34,20 @@ public class SearchDocumentsTool {
     private final RetrievalService retrieval;
     private final RetrievalLedger ledger;
     private final RagProperties props;
+    private final TurnProgress progress;
 
-    public SearchDocumentsTool(RetrievalService retrieval, RetrievalLedger ledger, RagProperties props) {
+    @org.springframework.beans.factory.annotation.Autowired
+    public SearchDocumentsTool(RetrievalService retrieval, RetrievalLedger ledger, RagProperties props,
+                               TurnProgress progress) {
         this.retrieval = retrieval;
         this.ledger = ledger;
         this.props = props;
+        this.progress = progress;
+    }
+
+    /** Without progress reporting (tests that do not care about stages). */
+    public SearchDocumentsTool(RetrievalService retrieval, RetrievalLedger ledger, RagProperties props) {
+        this(retrieval, ledger, props, new TurnProgress());
     }
 
     @Annotations.Schema(name = METHOD, description = "Searches the reference documents and returns the most "
@@ -65,7 +75,8 @@ public class SearchDocumentsTool {
             return refusal("NO_RELEVANT_CONTEXT", "The first search found nothing relevant in the documents. "
                     + "Do not search again: reply {\"status\":\"NOT_FOUND\"}.");
         }
-        RetrievalResult result = retrieval.retrieve(query);
+        RetrievalResult result = retrieval.retrieve(query, stage -> progress.emit(requestId, stage, ""));
+        progress.emit(requestId, "answering", "");
         RetrievalLedger.Retrieval recorded = ledger.register(requestId, query, result);
         log.info("search_documents request={} retrieval={} decision={} chunks={}", requestId, recorded.id(),
                 result.decision(), recorded.chunks().size());

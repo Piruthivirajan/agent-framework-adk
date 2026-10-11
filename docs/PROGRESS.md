@@ -85,7 +85,7 @@ Decisions (user): file agent shape decided by the step 0 spike; **two paths** to
 - [x] 3. `MapReduceSummarizer` (single pass, map-reduce, hierarchical reduce, failure behaviour)
 - [x] 4. `FileAgentPlugin`, fast path by code, coordinator tool with session files, summaries labelled
 - [x] 5. Follow-up rewriting from chat history (3 follow-up pairs in tests)
-- [ ] 6. API: `/api/chat`, `/api/files`, error handler; SSE stage events
+- [x] 6. API: `/api/chat`, `/api/files`, error handler; SSE stage events
 - [ ] 7. Knowledge base: `POST /api/kb/documents`, single-file ingestion with progress, no-text-layer rejection
 - [ ] 8. UI: chat, attach/paste, sources, trace panel, progress, KB upload; verified in the browser on A, B, C
 - [ ] 9. Scenario C measurement (small TXT, 20-page PDF, the 300+ page PDF), final limits from the numbers
@@ -97,6 +97,15 @@ Decisions (user): file agent shape decided by the step 0 spike; **two paths** to
 ## Log
 
 <!-- Newest first. One entry per task: date, what was built, what was verified. -->
+
+### 2026-10-11: Day 5 step 6, HTTP API, error mapping, SSE stage events (checked live)
+- **Endpoints:** `POST /api/chat` (JSON `{sessionId, message, fileId?}` returns the finished turn), `POST /api/chat/stream` (the same turn as server-sent events: one `stage` event per stage, then `result` or `error`), `POST /api/files` (multipart: a `file` part, or pasted text in a `text` field, same extraction and limits), `GET /api/files?sessionId=`. Turns of one session are serialized (a double click cannot interleave two turns in one ADK session). Validation: session id pattern, message at most 4,000 characters, file id shape; a file id without text gets "Summarize this file."
+- **Response (`ChatResponse`):** `kind` (`answer`, `summary`, `not_found`, `notice`), the verified `answer`, `sources` (file, page, quote, ref), `file` info for summaries, `rewrittenQuestion`, `verification`, the full `retrievals` trace (scores, hit counts, fused top 20, rerank scores, timings), `toolCalls`, `stages` (when each stage began), `requestId`, `totalMillis`. The raw model output is deliberately not in the API.
+- **Stages are real boundaries:** `understanding` (follow-up rewrite), `routing`, `searching`, `reranking` (a callback from `RetrievalService`), `answering` (the model writes from the chunks), `repairing`, `verifying`; file turns report `summarizing i/n` and `combining`. They go through `TurnProgress` keyed by the request id, are always recorded (so the JSON response carries the timeline too) and a listener that fails (browser closed) is dropped without failing the turn.
+- **Errors, one mapping for plain and stream:** upload reasons 400/413/415/422/409 with `{code, message}`; a model or summarization failure 502 `CHAT_FAILED` with the first line of the reason, any `AIza...` key masked and bounded to 300 characters; database down 503 `DATABASE_UNAVAILABLE`; anything else 500 `INTERNAL_ERROR` with a generic sentence (the stack trace goes to the log only).
+- **Live check (real model, `scripts/live-routing-check.py`, fresh session with an uploaded file each):** found a real defect first: "What does the Reliability pillar say about backups?" in a session with a file was rewritten to "...in the uploaded file..." and routed to the file agent. Fix: the rewriter prompt now states that a message that names its own subject must be returned exactly unchanged, with a negative example. After the fix **10 of 10** cases route correctly (3 reference questions to RAG, 3 file requests to the file agent, 3 follow-ups to RAG with a correct rewrite, "make it shorter" to the file agent). One run, 10 cases: not a rate.
+- **Latency observed live (single requests, API speed varies by the hour):** attachment turn (code rule) 3.9 s for a 900-character file; RAG turn 10 to 15 s (two searches up to 24 s); the follow-up rewrite adds 2.5 to 4.5 s to a turn. The rewrite cost is real; a gate for messages that look standalone is the option if the demo needs it.
+- Verified: BUILD SUCCESS, 275 tests (controllers with standalone MockMvc and a mocked service: validation, every error mapping, key masking, the stream's event order and error event, upload rejections).
 
 ### 2026-10-11: Day 5 step 5, follow-up questions made standalone
 - **Why:** the RAG agent runs in an isolated session and searches with the words it is given, so "who can use it?" would be searched literally. `ChatService` now keeps the last 4 turns per chat session (`ChatHistory`, in memory, answers cut to 500 characters, least recently used session dropped beyond 500 sessions) and, for every text turn that has history, asks `FollowUpRewriter` (one short model call, `TextGenerator`) to restate the latest message as a standalone one. The coordinator receives the rewritten text, so routing and the RAG search both benefit; `ChatResult.rewrittenQuestion` records it for the trace panel.

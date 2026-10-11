@@ -24,6 +24,7 @@ import java.util.List;
  * @param rewrittenQuestion the standalone message the coordinator actually received when the user's message
  *                    was a follow-up that had to be rewritten from the chat history; null when it was used as
  *                    written
+ * @param stages      when each stage of the turn started (routing, searching, reranking, ...), in order
  */
 public record ChatResult(
         String answer,
@@ -37,26 +38,44 @@ public record ChatResult(
         String requestId,
         long totalMillis,
         FileSummary file,
-        String rewrittenQuestion) {
+        String rewrittenQuestion,
+        List<StageEvent> stages) {
+
+    public ChatResult {
+        stages = stages == null ? List.of() : List.copyOf(stages);
+    }
+
+    public ChatResult(String answer, String route, boolean grounded, List<GroundingVerifier.Source> sources,
+                      List<RetrievalTrace> retrievals, Verification verification, List<String> toolCalls,
+                      String modelOutput, String requestId, long totalMillis, FileSummary file,
+                      String rewrittenQuestion) {
+        this(answer, route, grounded, sources, retrievals, verification, toolCalls, modelOutput, requestId,
+                totalMillis, file, rewrittenQuestion, List.of());
+    }
 
     /** Without a file summary (every RAG and no-tool result). */
     public ChatResult(String answer, String route, boolean grounded, List<GroundingVerifier.Source> sources,
                       List<RetrievalTrace> retrievals, Verification verification, List<String> toolCalls,
                       String modelOutput, String requestId, long totalMillis) {
         this(answer, route, grounded, sources, retrievals, verification, toolCalls, modelOutput, requestId,
-                totalMillis, null, null);
+                totalMillis, null, null, List.of());
     }
 
     public ChatResult(String answer, String route, boolean grounded, List<GroundingVerifier.Source> sources,
                       List<RetrievalTrace> retrievals, Verification verification, List<String> toolCalls,
                       String modelOutput, String requestId, long totalMillis, FileSummary file) {
         this(answer, route, grounded, sources, retrievals, verification, toolCalls, modelOutput, requestId,
-                totalMillis, file, null);
+                totalMillis, file, null, List.of());
     }
 
     public ChatResult withRewrittenQuestion(String rewritten) {
         return new ChatResult(answer, route, grounded, sources, retrievals, verification, toolCalls, modelOutput,
-                requestId, totalMillis, file, rewritten);
+                requestId, totalMillis, file, rewritten, stages);
+    }
+
+    public ChatResult withStages(List<StageEvent> timeline) {
+        return new ChatResult(answer, route, grounded, sources, retrievals, verification, toolCalls, modelOutput,
+                requestId, totalMillis, file, rewrittenQuestion, timeline);
     }
 
     /** What the file agent summarized and how, for the "summary of file X" label and the trace panel. */

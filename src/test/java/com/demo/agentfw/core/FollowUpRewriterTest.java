@@ -37,7 +37,9 @@ class FollowUpRewriterTest {
         String out = rewriter.rewrite(HISTORY, "What is its maximum message size?");
 
         assertThat(out).isEqualTo("What is the maximum message size in Amazon SQS?");
-        assertThat(systems.get(0)).contains("Never answer the message").contains("exactly unchanged");
+        assertThat(systems.get(0)).contains("Never answer the message").contains("EXACTLY unchanged")
+                .contains("Never add the conversation's topic")             // the over-rewrite seen live
+                .contains("What does the Reliability pillar say about backups?");
         assertThat(users.get(0)).contains("User: What is Amazon SQS?").contains("Assistant: A managed message queue")
                 .endsWith("Latest message: What is its maximum message size?");
     }

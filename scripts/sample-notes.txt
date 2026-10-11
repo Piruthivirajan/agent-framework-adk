@@ -1,0 +1,9 @@
+Quarterly platform review, Q3.
+
+Migration. The order-processing service moved from a self-managed message broker to Amazon SQS in March. The cut-over caused 12 minutes of delayed processing, no lost messages. Dead-letter queues were added for every consumer, with an alarm when more than 50 messages are waiting.
+
+Cost. Monthly compute spend fell by 12 percent after the move to Graviton instances and the removal of three idle staging clusters. Storage spend rose 4 percent because of longer log retention that audit asked for.
+
+Reliability. Two incidents were recorded. The first was a certificate expiry on the internal API gateway, caught by customers before monitoring. The second was a runaway batch job that exhausted database connections for 25 minutes.
+
+Next quarter. Automate certificate renewal, add connection pooling limits per job, and run a game day for the regional failover plan.

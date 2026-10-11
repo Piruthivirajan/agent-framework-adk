@@ -1,6 +1,11 @@
 spring:
   application:
     name: agent-framework
+  servlet:
+    multipart:
+      # keep equal to agentfw.files.max-bytes; the application also checks it and explains it in words
+      max-file-size: 20000000B
+      max-request-size: 21000000B
   config:
     # Loads GOOGLE_API_KEY (and other secrets) from the gitignored .env in the working directory.
     import: optional:file:.env[.properties]
@@ -30,6 +35,22 @@ agentfw:
     model-dir: models/ms-marco-MiniLM-L-6-v2       # gitignored; downloaded and sha256-verified on first start
     model-file: model.onnx                         # fp32; or model_quint8_avx2.onnx (int8)
     max-length: 512
+  files:
+    max-bytes: 20000000          # largest upload
+    max-chars: 1000000           # largest extracted text (starting value; final value from the large-file measurement)
+    ttl-hours: 24                # uploads are deleted by a MongoDB TTL index after this
+    max-files-per-session: 10
+  summary:
+    single-pass-max-chars: 30000 # up to this size: one model call
+    segment-chars: 15000         # map step segment size
+    reduce-max-chars: 30000      # most partial-summary text sent to one reduce call
+    parallelism: 4               # concurrent model calls in the map step
+    max-retries: 2
+    max-segments: 120
+  chat:
+    rewrite-follow-ups: true     # one short model call on every turn after the first (docs/PROGRESS.md, Day 5 step 5)
+    history-turns: 4
+    max-sessions: 500
   rag:
     max-searches: 2              # enforced in the search tool, not only in the prompt (docs/e2e/findings.md, section 7)
     stop-after-floor-miss: true  # a first search below the floor ends the turn: rewriting did not rescue any question

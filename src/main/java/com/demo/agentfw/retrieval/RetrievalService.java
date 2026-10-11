@@ -8,6 +8,7 @@ import org.springframework.stereotype.Service;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
+import java.util.function.Consumer;
 import java.util.stream.IntStream;
 
 /**
@@ -42,12 +43,22 @@ public class RetrievalService {
     }
 
     public RetrievalResult retrieve(String query) {
-        return retrieve(query, defaults);
+        return retrieve(query, defaults, stage -> { });
+    }
+
+    /** Same, telling {@code onStage} when the {@code searching} and {@code reranking} stages begin. */
+    public RetrievalResult retrieve(String query, Consumer<String> onStage) {
+        return retrieve(query, defaults, onStage);
     }
 
     /** Same as {@link #retrieve(String)} with explicit settings; the eval and calibration use this. */
     public RetrievalResult retrieve(String query, RetrievalProperties s) {
+        return retrieve(query, s, stage -> { });
+    }
+
+    private RetrievalResult retrieve(String query, RetrievalProperties s, Consumer<String> onStage) {
         long start = System.nanoTime();
+        onStage.accept("searching");
 
         long t0 = System.nanoTime();
         float[] queryVector = embeddings.embedQuery(query);
@@ -65,6 +76,7 @@ public class RetrievalService {
         List<RetrievalTrace.ScoredPassage> scored = List.of();
         List<RetrievedChunk> top = List.of();
         if (!pool.isEmpty()) {
+            onStage.accept("reranking");
             t0 = System.nanoTime();
             Reranker.Result r = reranker.rerank(query, pool.stream().map(Candidate::text).toList());
             rerankMs = millisSince(t0);

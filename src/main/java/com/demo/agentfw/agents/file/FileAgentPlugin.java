@@ -3,6 +3,7 @@ package com.demo.agentfw.agents.file;
 import com.demo.agentfw.agents.file.FileSummaryLedger.Outcome;
 import com.demo.agentfw.core.AgentContext;
 import com.demo.agentfw.core.AgentPlugin;
+import com.demo.agentfw.core.TurnProgress;
 import com.demo.agentfw.core.TurnState;
 import com.demo.agentfw.files.MapReduceSummarizer;
 import com.demo.agentfw.files.UploadService;
@@ -53,11 +54,20 @@ public class FileAgentPlugin implements AgentPlugin {
     private final UploadService uploads;
     private final MapReduceSummarizer summarizer;
     private final FileSummaryLedger ledger;
+    private final TurnProgress turnProgress;
 
-    public FileAgentPlugin(UploadService uploads, MapReduceSummarizer summarizer, FileSummaryLedger ledger) {
+    @org.springframework.beans.factory.annotation.Autowired
+    public FileAgentPlugin(UploadService uploads, MapReduceSummarizer summarizer, FileSummaryLedger ledger,
+                           TurnProgress turnProgress) {
         this.uploads = uploads;
         this.summarizer = summarizer;
         this.ledger = ledger;
+        this.turnProgress = turnProgress;
+    }
+
+    /** Without progress reporting (tests). */
+    public FileAgentPlugin(UploadService uploads, MapReduceSummarizer summarizer, FileSummaryLedger ledger) {
+        this(uploads, summarizer, ledger, new TurnProgress());
     }
 
     @Override
@@ -149,7 +159,8 @@ public class FileAgentPlugin implements AgentPlugin {
                 String requestId = str(state.get(TurnState.REQUEST_ID));
                 String sessionId = str(state.get(TurnState.SESSION_ID));
                 String text = handle(sessionId, requestId, str(state.get(TurnState.FILE_ID)), request,
-                        progress -> { });
+                        p -> turnProgress.emit(requestId, stageName(p), p.total() > 1
+                                ? p.done() + "/" + p.total() : ""));
                 return Event.builder().id(Event.generateEventId()).invocationId(context.invocationId())
                         .author(NAME).content(Content.builder().role("model").parts(Part.fromText(text)).build())
                         .build();
@@ -160,6 +171,11 @@ public class FileAgentPlugin implements AgentPlugin {
         protected Flowable<Event> runLiveImpl(InvocationContext context) {
             return Flowable.error(new UnsupportedOperationException("Live mode is not used by the file agent"));
         }
+    }
+
+    /** The stage a summarizer step is reported as ({@code summarizing}, {@code combining}). */
+    private static String stageName(MapReduceSummarizer.Progress p) {
+        return p.stage().startsWith("summarizing") ? "summarizing" : p.stage();
     }
 
     private static String str(Object o) {

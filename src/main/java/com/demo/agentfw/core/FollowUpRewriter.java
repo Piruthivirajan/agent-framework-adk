@@ -12,10 +12,11 @@ import java.util.List;
  * session and searches with what it is given, so without this a follow-up would be searched as the
  * literal words "its price".
  *
- * <p>One short model call per turn that has history. A message that is already standalone comes back
- * unchanged. The rewrite is only used when it is plausible (not empty, not much longer than the
- * original); otherwise the original message is used, so a bad rewrite can only cost a worse search,
- * never an error.
+ * <p>One short model call per turn that has history. A message that is already standalone must come
+ * back unchanged (a live run showed the failure mode: a self-contained question about the reference
+ * documents got "in the uploaded file" added and was routed to the file agent). The rewrite is only
+ * used when it is plausible (not empty, not much longer than the original); otherwise the original
+ * message is used, so a bad rewrite can only cost a worse search, never an error.
  */
 @Component
 public class FollowUpRewriter {
@@ -23,13 +24,29 @@ public class FollowUpRewriter {
     private static final Logger log = LoggerFactory.getLogger(FollowUpRewriter.class);
 
     static final String SYSTEM = """
-            You prepare the latest message of a chat for a system that cannot see the conversation. \
-            If the latest message refers back to the conversation (pronouns such as it, they or that; \
-            phrases such as "and the other one", "more about it", "shorter", "why"), rewrite it as ONE \
-            complete, self-contained message that names the things it refers to, using only the \
-            conversation shown. If it is already self-contained, return it exactly unchanged. Never \
-            answer the message, never add facts, keep the user's own wording where possible, and reply \
-            with the message text only: no quotes, no explanation.""";
+            You prepare the latest message of a chat for a system that cannot see the conversation.
+
+            Rule 1. A message that names its own subject is self-contained: return it EXACTLY unchanged, \
+            even if the conversation was about something else. Never add the conversation's topic, a file \
+            name, or words such as "in the uploaded file" to a message that already makes sense alone.
+            Rule 2. Only when the message cannot be understood alone because it points back to the \
+            conversation (it, they, that, this, "the other one", "and the cost one?", "shorter", "why?"), \
+            rewrite it as one complete message that names what it points to, using only the conversation.
+            Rule 3. Never answer the message, never add facts or qualifiers, keep the user's wording, \
+            and reply with the message text only: no quotes, no explanation.
+
+            Examples:
+            Conversation: User: What is Amazon SQS? Assistant: A managed message queue service.
+            Latest: What is its maximum message size?
+            Reply: What is the maximum message size of Amazon SQS?
+
+            Conversation: User: Summarize this file. Assistant: (a summary of notes.txt)
+            Latest: Make it shorter
+            Reply: Make the summary of notes.txt shorter
+
+            Conversation: User: Summarize this file. Assistant: (a summary of notes.txt)
+            Latest: What does the Reliability pillar say about backups?
+            Reply: What does the Reliability pillar say about backups?""";
 
     private static final int MAX_EXTRA_CHARS = 300;
 
