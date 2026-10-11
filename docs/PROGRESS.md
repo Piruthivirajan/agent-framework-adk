@@ -102,7 +102,7 @@ Decisions (user): file agent shape decided by the step 0 spike; **two paths** to
 - [x] 1. MCP settings page and registry: Streamable HTTP and legacy SSE, custom auth headers, test connection with tool list, runtime loading without restart, in-memory config, masked, never logged
 - [x] 2. MCP answer path: `mcp_agent`, "RAG not found then MCP" in code, which server and tool answered, raw tool result in the trace
 - [x] 3. Clear messages: wrong URL, wrong token, server down, tool error, Gemini timeout and rate limit
-- [ ] 4. Demo MCP server (`src/test/java/com/demo/agentfw/mcp/DemoMcpServer.java`) and instructions
+- [x] 4. Demo MCP server (`src/test/java/com/demo/agentfw/mcp/DemoMcpServer.java`) and instructions
 - [ ] 5. Demo login (one password from the environment) protecting the whole app
 
 ## Watch list
@@ -112,6 +112,11 @@ Decisions (user): file agent shape decided by the step 0 spike; **two paths** to
 ## Log
 
 <!-- Newest first. One entry per task: date, what was built, what was verified. -->
+
+### 2026-10-11: Day 6 step 4, demo MCP server and instructions (`docs/DEMO_MCP.md`)
+- `DemoMcpServer` (one Java file, JDK only, runs with `java src/test/java/com/demo/agentfw/mcp/DemoMcpServer.java --port 8099 --token demo-secret`): Streamable HTTP at `/mcp` and legacy SSE at `/sse`, bearer token on both (401 otherwise), tools `lookup_order`, `oncall_engineer` and `billing_report` (always fails, to show tool errors), invented data. The same class is the in-process server of the registry and answer-path tests.
+- `docs/DEMO_MCP.md`: start the server, configure it in the settings page, the questions to ask and what each shows, the error messages to provoke, the scripted version (`scripts/live-mcp-check.py`), and the limits (no stdio, memory only, no SSRF protection beyond http and https).
+- The settings page was also exercised in the browser pane: a wrong token shows the 401 sentence, the right token lists the 3 tools, saving shows them in the list with "Credentials: Authorization (values hidden)", and the page contains no copy of the token.
 
 ### 2026-10-11: Day 6 steps 1 to 3, MCP settings, MCP answer path, clear failure messages
 - **Settings page (`/mcp.html`) and API (`/api/mcp/servers`):** add, test (lists the tools without saving), update, enable or disable, delete, "test again". Streamable HTTP and legacy SSE, any number of custom headers (typed into password fields). The page says in words that **stdio servers are not supported** (a hosted application cannot run a local command for you) and that credentials live in memory only. Saving loads the tools at once and a `McpConfigChanged` event makes the coordinator rebuild on the next message: **no restart** (tested: a server added at runtime is used by the next message).
