@@ -59,7 +59,7 @@ Decisions: `gemini-3.8-flash` for both agents, configurable by name, low thinkin
 - [x] 3. `GroundingVerifier` (quote and numeric support) and renderer
 - [x] 4. `ChatService` with scripted-model scenario A and B tests
 - [x] 5. Live scenarios A and B; thinking-budget measurement
-- [ ] 6. 48-question end-to-end run, `docs/END_TO_END.md`
+- [x] 6. 48-question end-to-end run, `docs/END_TO_END.md`
 
 **Day 6 note (user):** the "final answer comes from the verified `rag_agent` result, coordinator prose ignored, no tool called gives the fixed reply" rule applies to **RAG answers only**. MCP tool answers will need their own path (the coordinator calls MCP tools directly, so its prose is the answer there); do not apply the RAG verifier to them.
 
@@ -67,12 +67,12 @@ Decisions: `gemini-3.8-flash` for both agents, configurable by name, low thinkin
 
 Retrieval gate (done, Day 3): a low **floor** at -6.5 removes only clear junk; 3.3 is recorded as "high confidence" in the trace only. The real grounding decision moves to the answering step:
 
-- [ ] RAG agent output contract: **every claim is cited as [file, page] and carries a short verbatim supporting quote** from the cited chunk.
-- [ ] **`GroundingVerifier`** (deterministic, after the LLM): for every citation, the quote must be found in the text of the retrieved chunk that was cited, compared after whitespace normalisation. If any quote is not found, or a cited [file, page] was not retrieved, the answer is replaced by **"Not found in the reference documents."** Purpose: stop the model answering OUT_AWS questions (a quota, a price) from its own training knowledge. Unit-tested without any LLM.
-- [ ] **End-to-end run of all 48 calibration questions** through the real coordinator and RAG agent, reported **per question type** (IN_CORPUS, OUT_FAR, OUT_NEAR, OUT_AWS): correct answers, false answers (an answer to an unanswerable question, or a wrong answer), and false "not found". Strict and widened expected pages both reported.
-- [ ] Before building: verify the ADK 1.11.0 class and method names (`AgentTool`, `FunctionTool.create`, `LlmAgent`, tool context) against the jar; the skeleton in PLAN.md predates it.
-- [ ] Paraphrased questions were 0 of 2 at retrieval: test whether the agent's query rewriting (up to 3 `searchDocuments` calls) recovers them.
-- [ ] Definitional "what is X" questions score low with the MS MARCO cross-encoder even when the right page is retrieved (in-03, in-17); the floor is deliberately below them. Check that the verifier, not the floor, is what protects against false answers.
+- [x] RAG agent output contract: **every claim is cited as [file, page] and carries a short verbatim supporting quote** from the cited chunk.
+- [x] **`GroundingVerifier`** (deterministic, after the LLM): for every citation, the quote must be found in the text of the retrieved chunk that was cited, compared after whitespace normalisation. If any quote is not found, or a cited [file, page] was not retrieved, the answer is replaced by **"Not found in the reference documents."** Purpose: stop the model answering OUT_AWS questions (a quota, a price) from its own training knowledge. Unit-tested without any LLM.
+- [x] **End-to-end run of all 48 calibration questions** through the real coordinator and RAG agent, reported **per question type** (IN_CORPUS, OUT_FAR, OUT_NEAR, OUT_AWS): correct answers, false answers (an answer to an unanswerable question, or a wrong answer), and false "not found". Strict and widened expected pages both reported.
+- [x] Before building: verify the ADK 1.11.0 class and method names (`AgentTool`, `FunctionTool.create`, `LlmAgent`, tool context) against the jar; the skeleton in PLAN.md predates it.
+- [x] Paraphrased questions were 0 of 2 at retrieval: test whether the agent's query rewriting (up to 3 `searchDocuments` calls) recovers them.
+- [x] Definitional "what is X" questions score low with the MS MARCO cross-encoder even when the right page is retrieved (in-03, in-17); the floor is deliberately below them. Check that the verifier, not the floor, is what protects against false answers.
 
 ## Watch list
 
@@ -81,6 +81,16 @@ Retrieval gate (done, Day 3): a low **floor** at -6.5 removes only clear junk; 3
 ## Log
 
 <!-- Newest first. One entry per task: date, what was built, what was verified. -->
+
+### 2026-10-11: Day 4 finished, end-to-end results (`docs/END_TO_END.md`)
+- **48 questions through the real coordinator, RAG agent, retrieval and verifier** (`gemini-3.8-flash`, coordinator budget 128, agent budget 0, floor -6.5, rerank depth 12): in-corpus **28 of 32 answered with an acceptable page** (25 on strict pages), 2 "false answers" by the page rule, 2 false "not found"; **out-of-corpus 16 of 16 correctly not answered** (6 unrelated, 6 near-domain, 4 AWS limits and prices). The same run with the agent's default thinking budget: 27 correct (24 strict), 2 false answers, 3 false "not found", 16 of 16 out-of-corpus.
+- **The "false answers" are not wrong answers**: all four (two per run) were read quote by quote; every quote is verbatim on the cited page, which repeats the same text in another document (the framework PDF copies each pillar) or is a better page than the one expected (in-21, serverless lens p. 67). By reading: no false answers in either run. The expected sets were not widened further (a separate, documented step if wanted).
+- **The verifier replaced 0 answers** in both full runs, so the false "not found" rate caused by the verifier is **0 of 32**; the one-retry option was not built. Caveat: in all 16 out-of-corpus questions the model itself answered NOT_FOUND, so the verifier's protection is tested by scripted cases but **not observed live**.
+- **Agent thinking budget 0 adopted** (`agent-thinking-budget: 0`): median 15.8 s to 12.3 s, mean 17.5 to 11.6 s, p90 23.1 to 15.1 s, max 44.2 to 23.1 s, no loss of quality. Coordinator budget: no measurable effect (kept at 128).
+- **Latency is still the open problem** (12.3 s median): model calls dominate (each search is about 1.4 s of retrieval, and the agent makes a model call per search with up to 12 chunks); unanswerable questions use all 3 searches; the "at most 3 searches" limit is only an instruction (one question made 5). Levers not yet built: enforce and lower the search cap, stop rewriting when the first search is below the floor, cache the query embedding, stream the answer.
+- **For Day 5 (UI/API):** `ChatResult` carries `answer`, `sources` (file, page, quote; quotes never inline; show as expandable sources), `grounded`, `route`, `retrievals` (trace per search: scores, ranks, timings), `verification.problems`, `toolCalls`, `totalMillis`. A model error or a runaway loop surfaces as `ChatFailedException`: the UI must show a clear message, not a stack trace. The no-tool reply and the not-found sentence are fixed strings.
+- **For Day 6:** MCP and file-agent answers need their own path (see the Day 6 note above); `finalAnswer=true` ends the turn after one agent, so "RAG then MCP" needs a different arrangement.
+- Verified: BUILD SUCCESS, 183 tests.
 
 ### 2026-10-11: Day 4 step 5, live scenarios and the thinking-budget measurement
 - **Vehicle:** `EndToEndRunner` (only with `agentfw.e2e.run=true`): asks calibration questions through the real `ChatService`, classifies each (verdict, strict-correct, reason for not answering), saves `docs/e2e/<label>.json`. Retries a failed turn twice with back-off.

@@ -23,7 +23,7 @@ agentfw:
     model: gemini-3.8-flash          # coordinator and agents; the name is configuration, not code
     api-key: ${GOOGLE_API_KEY:}
     coordinator-thinking-budget: 128 # the coordinator only routes; measured against the default in docs/END_TO_END.md
-    # agent-thinking-budget: unset = the model's default
+    agent-thinking-budget: 0         # measured on all 48 questions: median 15.8 s -> 12.3 s, no loss of quality (docs/END_TO_END.md)
     max-llm-calls: 12                # per request: runaway-loop and cost guard
   rerank:
     provider: djl                                  # "fake" is used by tests; the fake lives in src/test
