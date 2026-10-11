@@ -148,7 +148,7 @@ class ChatControllerTest {
                         .accept(MediaType.TEXT_EVENT_STREAM).content(body("tab-1", "What is it?", null)))
                 .andExpect(request().asyncStarted()).andReturn();
 
-        String stream = awaitContaining(started, "event:result");
+        String stream = awaitContaining(started, "\"totalMillis\":");     // the last field of the result event
         assertThat(stream).contains("event:stage").contains("\"stage\":\"routing\"").contains("\"stage\":\"searching\"")
                 .contains("\"stage\":\"reranking\"").contains("\"stage\":\"verifying\"");
         assertThat(stream.indexOf("routing")).isLessThan(stream.indexOf("verifying"));
@@ -165,7 +165,7 @@ class ChatControllerTest {
                         .accept(MediaType.TEXT_EVENT_STREAM).content(body("tab-1", "hi", null)))
                 .andExpect(request().asyncStarted()).andReturn();
 
-        String stream = awaitContaining(started, "event:error");
+        String stream = awaitContaining(started, "\"message\":");
         assertThat(stream).contains("\"code\":\"CHAT_FAILED\"").contains("timeout").doesNotContain("event:result");
     }
 

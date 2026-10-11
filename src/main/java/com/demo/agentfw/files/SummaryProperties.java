@@ -20,7 +20,7 @@ public record SummaryProperties(
         @DefaultValue("30000") int reduceMaxChars,
         @DefaultValue("4") int parallelism,
         @DefaultValue("2") int maxRetries,
-        @DefaultValue("120") int maxSegments) {
+        @DefaultValue("250") int maxSegments) {
 
     public SummaryProperties {
         if (singlePassMaxChars < 1000 || segmentChars < 1000 || reduceMaxChars < 2000 || parallelism < 1
@@ -31,6 +31,6 @@ public record SummaryProperties(
     }
 
     public static SummaryProperties defaults() {
-        return new SummaryProperties(30_000, 15_000, 30_000, 4, 2, 120);
+        return new SummaryProperties(30_000, 15_000, 30_000, 4, 2, 250);
     }
 }

@@ -88,7 +88,7 @@ Decisions (user): file agent shape decided by the step 0 spike; **two paths** to
 - [x] 6. API: `/api/chat`, `/api/files`, error handler; SSE stage events
 - [x] 7. Knowledge base: `POST /api/kb/documents`, single-file ingestion with progress, no-text-layer rejection
 - [x] 8. UI: chat, attach/paste, sources, trace panel, progress, KB upload; verified in the browser on A, B, C
-- [ ] 9. Scenario C measurement (small TXT, 20-page PDF, the 300+ page PDF), final limits from the numbers
+- [x] 9. Scenario C measurement (small TXT, 20-page PDF, the 300+ page PDF), final limits from the numbers
 
 ## Watch list
 
@@ -97,6 +97,26 @@ Decisions (user): file agent shape decided by the step 0 spike; **two paths** to
 ## Log
 
 <!-- Newest first. One entry per task: date, what was built, what was verified. -->
+
+### 2026-10-11: Day 5 step 9, scenario C measured on real files, limits set from the numbers
+Live, through the streaming endpoint, `gemini-3.8-flash`, thinking budget 0, single runs (`scripts/live-file-summary-check.py`). "Parts" are map calls; each file is asked for "a summary in about 150 words".
+
+| file | pages | characters (Tika) | strategy | parts | model calls | extract | turn |
+| --- | ---: | ---: | --- | ---: | ---: | ---: | ---: |
+| 900-character text file (step 6) | - | 896 | single pass | 1 | 1 | <0.1 s | 3.9 s |
+| disaster-recovery-workloads-on-aws.pdf | 40 | 77,381 | map-reduce | 6 | 7 | 1.2 s | 19.1 s |
+| wellarchitected-performance-efficiency-pillar.pdf | 124 | 278,488 | map-reduce | 20 | 21 | 1.5 s | 26.1 s |
+| wellarchitected-security-pillar.pdf | 240 | 649,311 | map-reduce, grouped reduce (3 groups) | 45 | 49 | 4.5 s | 64.5 s |
+| wellarchitected-reliability-pillar.pdf | 274 | 694,041 | map-reduce, grouped reduce (3 groups) | 47 | 51 | 3.7 s | 69.8 s |
+| wellarchitected-framework.pdf (14.2 MB) | 1,003 | 2,527,948 | map-reduce, grouped reduce (10 groups) | 173 | 184 | 22.7 s | 246.6 s |
+
+- **Correction to a premise in the plan:** the "300+ page" documents are the pillars (155 to 274 pages, 0.3 to 0.7M characters); the framework PDF is **1,003 pages and 2.5M characters**, so even a 1M limit refuses it. It is refused with the sentence "The file contains more than 1,000,000 characters of text, which is more than can be summarized. Split it and upload the part you need." (HTTP 413, `TOO_MUCH_TEXT`), not with an error.
+- **Time model from the numbers:** about 3 s plus roughly 10 s per 100,000 characters (4 parts in parallel): 1M characters is about 110 s, the framework PDF 4 minutes. The map step is the bulk (security pillar: map 53 s, grouped reduce 7 s, final combine 3.6 s). Zero retries or errors were logged in any run.
+- **Parallelism 8 is not faster than 4** (security pillar: map step 53.6 s vs 53.3 s, same 45 parts, the log confirms `parallelism=8`). So the limit is not our bound; the cause is not investigated (a client connection pool or the API's per-key concurrency are the candidates). Kept at 4.
+- **Final values:** `max-bytes` 20 MB (the framework PDF at 14.2 MB passes), `max-chars` **1,000,000** (about 110 s worst case, which a person will wait for with the progress shown), `max-segments` raised from 120 to **250** so that `max-chars` is the only knob up to the 3,000,000 ceiling, `single-pass-max-chars` 30,000, segment 15,000, reduce 30,000, parallelism 4. To summarize the framework PDF itself: `--agentfw.files.max-chars=3000000` and accept 4 minutes; the knowledge base already holds it for question answering.
+- **Quality, read not scored:** each summary names the right structure of its document (disaster recovery: the four strategies Backup and Restore, Pilot Light, Warm Standby, Multi-Site; performance efficiency: its five areas; security pillar: seven domains; reliability: REL01 to REL13 across four areas; framework: the six pillars). Not checked claim by claim: summaries are labelled and are not quote-verified by design. Some "�" characters appear in the printed text only because of the Windows console; the JSON is UTF-8.
+- **Costs to state:** a 1M-character file is about 70 model calls (a few cents on flash-class pricing, not measured in money); the Tika extraction of a 14 MB PDF blocks the upload request for 23 s.
+- Verified: BUILD SUCCESS, 292 tests.
 
 ### 2026-10-11: Day 5 step 8, the chat page (`src/main/resources/static/index.html`)
 - **One static page, no framework, no build step.** Conversation with attach (PDF, DOCX, text) and paste-text, an attachment chip, live progress while a turn runs (the stage events of step 6: "Choosing an agent", "Searching the documents", "Ranking the passages", "Writing the answer", "Checking every quote", "Summarizing the file" with parts), then the answer with a label that says what kind of answer it is ("From the reference documents · every quote checked", "Summary of notes.txt · not quote-checked", "Not in the reference documents", "Notice").

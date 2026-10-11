@@ -37,16 +37,17 @@ agentfw:
     max-length: 512
   files:
     max-bytes: 20000000          # largest upload
-    max-chars: 1000000           # largest extracted text (starting value; final value from the large-file measurement)
+    max-chars: 1000000           # largest extracted text: about 110 s to summarize (measured, docs/PROGRESS.md Day 5 step 9).
+                                 # The 1,003-page framework PDF has 2.5M characters and needs 3000000 (about 4 minutes)
     ttl-hours: 24                # uploads are deleted by a MongoDB TTL index after this
     max-files-per-session: 10
   summary:
     single-pass-max-chars: 30000 # up to this size: one model call
     segment-chars: 15000         # map step segment size
     reduce-max-chars: 30000      # most partial-summary text sent to one reduce call
-    parallelism: 4               # concurrent model calls in the map step
+    parallelism: 4               # concurrent model calls in the map step; 8 gave the same time (measured)
     max-retries: 2
-    max-segments: 120
+    max-segments: 250            # covers max-chars up to the 3,000,000 ceiling at 15,000 characters a part
   chat:
     rewrite-follow-ups: true     # one short model call on every turn after the first (docs/PROGRESS.md, Day 5 step 5)
     history-turns: 4

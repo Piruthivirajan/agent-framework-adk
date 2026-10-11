@@ -63,7 +63,7 @@ class KnowledgeBaseControllerTest {
         MvcResult started = mvc.perform(multipart("/api/kb/documents").file(file).accept(MediaType.TEXT_EVENT_STREAM))
                 .andExpect(request().asyncStarted()).andReturn();
 
-        String stream = awaitContaining(started, "event:result");
+        String stream = awaitContaining(started, "\"replaced\":");
         assertThat(stream).contains("event:stage").contains("\"stage\":\"parsing\"").contains("\"stage\":\"embedding\"")
                 .contains("\"stage\":\"storing\"").contains("\"status\":\"INGESTED\"")
                 .contains("\"fileName\":\"Refund-Policy.pdf\"").contains("\"replaced\":false");
@@ -109,7 +109,7 @@ class KnowledgeBaseControllerTest {
     void aNameCollisionWithDifferentContentIs409UntilReplaceIsConfirmed() throws Exception {
         MockMultipartFile first = new MockMultipartFile("file", "policy.pdf", "application/pdf", pdf());
         MvcResult started = mvc.perform(multipart("/api/kb/documents").file(first)).andReturn();
-        awaitContaining(started, "event:result");
+        awaitContaining(started, "\"replaced\":");
         MockMultipartFile other = new MockMultipartFile("file", "policy.pdf", "application/pdf",
                 TestPdfs.create("A page about shipping.", ("Shipping rules apply to parcels. ").repeat(10)));
 
@@ -118,7 +118,7 @@ class KnowledgeBaseControllerTest {
         MvcResult replaced = mvc.perform(multipart("/api/kb/documents").file(other).param("replace", "true"))
                 .andExpect(request().asyncStarted()).andReturn();
 
-        assertThat(awaitContaining(replaced, "event:result")).contains("\"replaced\":true");
+        assertThat(awaitContaining(replaced, "\"replaced\":")).contains("\"replaced\":true");
     }
 
     private static String awaitContaining(MvcResult result, String marker) throws Exception {
