@@ -18,6 +18,13 @@ agentfw:
     batch-size: 32
     max-retries: 5
     api-key: ${GOOGLE_API_KEY:}
+  llm:
+    provider: gemini                 # "fake" is used by tests; the fake lives in src/test
+    model: gemini-3.8-flash          # coordinator and agents; the name is configuration, not code
+    api-key: ${GOOGLE_API_KEY:}
+    coordinator-thinking-budget: 128 # the coordinator only routes; measured against the default in docs/END_TO_END.md
+    # agent-thinking-budget: unset = the model's default
+    max-llm-calls: 12                # per request: runaway-loop and cost guard
   rerank:
     provider: djl                                  # "fake" is used by tests; the fake lives in src/test
     model-dir: models/ms-marco-MiniLM-L-6-v2       # gitignored; downloaded and sha256-verified on first start

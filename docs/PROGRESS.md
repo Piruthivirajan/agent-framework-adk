@@ -54,7 +54,7 @@ Decisions: reranker `ms-marco-MiniLM-L6-v2` fp32 as baseline, int8 chosen only i
 Decisions: `gemini-3.8-flash` for both agents, configurable by name, low thinking budget on the coordinator (latency measured); numeric-support rule with number-format normalisation; any bad quote replaces the whole answer, no retry for now (measure the false "not found" rate first; if high, test ONE retry that sends the verifier's error back to the RAG agent); the final answer is the verified `rag_agent` result and the coordinator's prose is ignored; when no tool is called the reply is the fixed sentence "I can answer questions about the reference documents, summarize files, or use connected tools. I couldn't find that in the reference documents."; quotes go in a separate `sources` list of the API response, not inline in the answer text.
 
 - [x] 0. API spike (scripted model, one live call)
-- [ ] 1. Plugin framework: `AgentPlugin`, `AgentRegistry`, `CoordinatorFactory`, `ModelFactory`, third-plugin test
+- [x] 1. Plugin framework: `AgentPlugin`, `AgentRegistry`, `CoordinatorFactory`, `ModelFactory`, third-plugin test
 - [ ] 2. Retrieval tool, `RetrievalLedger`, `RagAgentPlugin` (instruction and JSON contract); rename `GroundingDecision.OK`
 - [ ] 3. `GroundingVerifier` (quote and numeric support) and renderer
 - [ ] 4. `ChatService` with scripted-model scenario A and B tests
@@ -81,6 +81,13 @@ Retrieval gate (done, Day 3): a low **floor** at -6.5 removes only clear junk; 3
 ## Log
 
 <!-- Newest first. One entry per task: date, what was built, what was verified. -->
+
+### 2026-10-11: Day 4 step 1, plugin framework
+- `AgentPlugin` (`name`, `description`, `build(AgentContext)`, `finalAnswer()` default true), `AgentRegistry` (validates names and descriptions, rejects duplicates, sorts for a deterministic prompt, wraps each plugin's agent in `AgentTool.create(agent, finalAnswer)`), `CoordinatorFactory` (router instruction generated from the plugins' descriptions; runner built on first use and cached, `invalidate()` for runtime tool changes; `maxLlmCalls` from config), `ModelFactory` seam with `GeminiModelFactory` (key checked lazily, so the application and the tests start without one).
+- `finalAnswer()` documents the consequence of skip-summarization: the turn ends after that agent, so the coordinator cannot chain another tool behind it. That is fine for the RAG route now and is the thing to revisit for the Day 6 "RAG then MCP" fallback.
+- Config: `agentfw.llm` (model `gemini-3.8-flash`, `coordinator-thinking-budget: 128`, `max-llm-calls: 12`). Tests use `agentfw.llm.provider=fake`: the real factory does not exist then, and `FakeModelFactory` hands out a `ScriptedLlm` (src/test).
+- Tests (scripted model, no network): one tool per plugin and descriptions in the instruction; **a third plugin is one new class and the coordinator offers it with nothing else changed**; a final-answer agent ends the turn with one coordinator call, a non-final one gets a second; thinking budgets applied per role; runner caching and invalidation; registry rejects duplicate, invalid and undescribed plugins; the Gemini factory fails fast without a key; the key is never printed.
+- Verified: BUILD SUCCESS, 129 tests.
 
 ### 2026-10-11: Day 4 step 0, ADK 1.11.0 spike (what was verified, not assumed)
 - **Tool context:** a `FunctionTool` instance method receives the `ToolContext` only if the parameter is named `toolContext` (matched by reflection, so the class must be compiled with `-parameters`, which the Spring Boot parent does). Other parameters need `@Annotations.Schema(name, description)`. `ToolContext` exposes `userId()`, `sessionId()`, `invocationId()`, `agentName()`, `state()`.
