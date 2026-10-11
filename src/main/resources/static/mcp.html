@@ -58,6 +58,8 @@
       When the reference documents have no answer, the assistant tries these tools.</p>
     <div class="notice"><strong>Supported:</strong> MCP servers reachable over the network with <em>Streamable HTTP</em> (current) or the older <em>SSE</em> transport.
       <strong>Not supported: stdio</strong> servers (started as a local command), because a hosted application cannot run commands for you.</div>
+    <div class="notice"><strong>Addresses:</strong> only public servers can be connected. Addresses on a private network,
+      this machine, or a link-local range (such as the cloud metadata address) are refused unless the administrator has allowed that host name.</div>
     <div class="notice"><strong>Credentials:</strong> kept in the memory of the running application only, shown here by header name only, never written to disk or to the log, and never sent to the language model.
       They are lost when the application restarts.</div>
   </div>

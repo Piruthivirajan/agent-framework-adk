@@ -3,6 +3,7 @@ package com.demo.agentfw.api;
 import com.demo.agentfw.core.ChatService;
 import com.demo.agentfw.files.UploadRejectedException;
 import com.demo.agentfw.ingestion.KnowledgeBaseService;
+import com.demo.agentfw.mcp.McpFailure;
 import com.demo.agentfw.mcp.McpRegistry;
 import com.mongodb.MongoException;
 import org.springframework.dao.DataAccessException;
@@ -29,6 +30,9 @@ final class ErrorMapping {
         }
         if (t instanceof KnowledgeBaseService.KbRejectedException e) {
             return new Mapped(status(e.reason()), new ApiError(e.reason().name(), clean(e.getMessage())));
+        }
+        if (t instanceof McpRegistry.McpBlockedException e) {
+            return new Mapped(HttpStatus.BAD_REQUEST, new ApiError(McpFailure.BLOCKED_ADDRESS, clean(e.getMessage())));
         }
         if (t instanceof McpRegistry.NoSuchElementException e) {
             return new Mapped(HttpStatus.NOT_FOUND, new ApiError("NOT_FOUND", clean(e.getMessage())));

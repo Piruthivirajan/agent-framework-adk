@@ -1,0 +1,39 @@
+# Caddy in front of the application: automatic HTTPS (Let's Encrypt, with ZeroSSL as fallback) for
+# DOMAIN, which on a VM without a domain name is <ip-with-dashes>.sslip.io (scripts/deploy.sh sets it).
+#
+# Port 80 must be reachable from the internet: it is used for the certificate challenge and redirects
+# to https. Nothing but this proxy is published by docker-compose.prod.yml.
+{
+	email {$ACME_EMAIL}
+}
+
+{$DOMAIN} {
+	# the application's own upload limit is 20 MB; leave a little for the multipart envelope
+	request_body {
+		max_size 25MB
+	}
+
+	reverse_proxy app:8080 {
+		# Server-sent events (the chat stages, the knowledge base progress) must reach the browser as
+		# they are written: do not buffer the response. -1 flushes immediately.
+		flush_interval -1
+
+		# a large file summary can take several minutes before the response is complete
+		transport http {
+			response_header_timeout 15m
+			read_timeout 15m
+		}
+	}
+
+	# no `encode` directive: compressing a text/event-stream response would buffer it
+
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		Referrer-Policy "no-referrer"
+		# the pages use inline script and style and talk only to their own origin
+		Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; connect-src 'self'; img-src 'self' data:; frame-ancestors 'none'; base-uri 'none'; form-action 'self'"
+		-Server
+	}
+}

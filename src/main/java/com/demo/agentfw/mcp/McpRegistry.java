@@ -73,11 +73,32 @@ public class McpRegistry implements DisposableBean {
 
     private final ApplicationEventPublisher events;
     private final McpCallLedger ledger;
+    private final McpUrlGuard guard;
     private final Map<String, Entry> servers = new LinkedHashMap<>();
 
-    public McpRegistry(ApplicationEventPublisher events, McpCallLedger ledger) {
+    @org.springframework.beans.factory.annotation.Autowired
+    public McpRegistry(ApplicationEventPublisher events, McpCallLedger ledger, McpUrlGuard guard) {
         this.events = events;
         this.ledger = ledger;
+        this.guard = guard;
+    }
+
+    /** Without the address guard (tests that connect to a server on localhost). */
+    public McpRegistry(ApplicationEventPublisher events, McpCallLedger ledger) {
+        this(events, ledger, McpUrlGuard.allowAll());
+    }
+
+    /** The URL is for an address the application must not call (see {@link McpUrlGuard}). */
+    public static class McpBlockedException extends IllegalArgumentException {
+        public McpBlockedException(String message) {
+            super(message);
+        }
+    }
+
+    private void requireAllowed(McpServerConfig c) {
+        guard.check(c.url()).ifPresent(f -> {
+            throw new McpBlockedException(f.message());
+        });
     }
 
     // ---- configuration (called by the settings API) ----------------------------------------------
@@ -85,6 +106,10 @@ public class McpRegistry implements DisposableBean {
     /** Connects without saving anything; used by "Test connection" before the form is saved. */
     public TestResult test(McpServerConfig config) {
         config.validate();
+        Optional<McpFailure> blocked = guard.check(config.url());
+        if (blocked.isPresent()) {
+            return new TestResult(false, List.of(), blocked.get());
+        }
         Connected c = null;
         try {
             c = connect(config);
@@ -101,6 +126,7 @@ public class McpRegistry implements DisposableBean {
     /** Saves a server and loads its tools now. A server that cannot be reached is saved with its error. */
     public ServerView add(McpServerConfig input) {
         input.validate();
+        requireAllowed(input);
         synchronized (servers) {
             if (servers.size() >= MAX_SERVERS) {
                 throw new IllegalArgumentException("At most " + MAX_SERVERS + " MCP servers can be configured.");
@@ -129,6 +155,7 @@ public class McpRegistry implements DisposableBean {
                     url == null ? old.url() : url.strip(), transport == null ? old.transport() : transport,
                     headers == null ? old.headers() : headers, enabled == null ? old.enabled() : enabled);
             next.validate();
+            requireAllowed(next);
             e.config = next;
             reconnect(e);
             publish();
@@ -248,6 +275,10 @@ public class McpRegistry implements DisposableBean {
     }
 
     private Connected connect(McpServerConfig c) {
+        Optional<McpFailure> blocked = guard.check(c.url());     // again: DNS or the allowlist may have changed
+        if (blocked.isPresent()) {
+            throw new McpConnectException(blocked.get(), null);
+        }
         Optional<McpFailure> problem = McpProbe.check(c, Duration.ofSeconds(5), Duration.ofSeconds(8));
         if (problem.isPresent()) {
             throw new McpConnectException(problem.get(), null);

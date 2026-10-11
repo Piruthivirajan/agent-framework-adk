@@ -19,6 +19,7 @@ public record McpFailure(String code, String message) {
     public static final String WRONG_URL = "WRONG_URL";
     public static final String NOT_MCP = "NOT_MCP_SERVER";
     public static final String TIMEOUT = "TIMEOUT";
+    public static final String BLOCKED_ADDRESS = "BLOCKED_ADDRESS";
     public static final String TOOL_ERROR = "TOOL_ERROR";
     public static final String OTHER = "MCP_ERROR";
 

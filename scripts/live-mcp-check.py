@@ -1,4 +1,5 @@
-"""Live scenario D check. Needs the application on :8080 and the demo MCP server on :8099:
+"""Live scenario D check. Needs the application on :8080 (started with AGENTFW_MCP_ALLOWED_HOSTS=localhost, or the SSRF guard
+refuses the demo server) and the demo MCP server on :8099:
 
     java src/test/java/com/demo/agentfw/mcp/DemoMcpServer.java --port 8099 --token demo-secret
     python scripts/live-mcp-check.py

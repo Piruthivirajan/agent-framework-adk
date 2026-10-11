@@ -34,7 +34,8 @@ Tools it offers:
 
 ```bash
 docker compose up -d        # MongoDB Atlas local
-./mvnw spring-boot:run      # then open http://localhost:8080
+# the demo server is on this machine, which the SSRF guard refuses unless the host is allowed:
+AGENTFW_MCP_ALLOWED_HOSTS=localhost ./mvnw spring-boot:run      # then open http://localhost:8080
 ```
 
 Open **MCP settings** (side panel of the chat page, or `http://localhost:8080/mcp.html`).
@@ -73,6 +74,8 @@ In the chat:
 | stop the demo server, press **Test again** | Unable to connect to MCP server: nothing answered at ... |
 | SSE URL with transport Streamable HTTP (or the reverse) | The address answered with HTTP 405 ... Check the transport. |
 | `npx some-server` as the URL | That is not a URL. Servers started by a local command (stdio) are not supported ... |
+| `http://169.254.169.254/latest/meta-data/` | This address is not allowed: it points to a private, loopback or link-local network ... |
+| `http://localhost:8099/mcp` without `AGENTFW_MCP_ALLOWED_HOSTS=localhost` | the same "not allowed" sentence, with the setting to change |
 
 ## 5. Scripted version
 
@@ -90,7 +93,9 @@ tool calls. It deletes the servers it created.
 - **stdio is not supported**, by design: a hosted application cannot run a user-supplied command.
 - Configuration is **in memory only**, not persisted and not encrypted (production next step: persist it
   encrypted with a key from the environment).
-- The server URL is fetched by the application; there is no allow-list or SSRF protection beyond
-  `http`/`https` only. The settings page is behind the demo login for that reason.
+- The server URL is fetched by the application. An **SSRF guard** refuses addresses that resolve to a
+  private, loopback or link-local network (the cloud metadata address included) unless the host is listed in
+  `AGENTFW_MCP_ALLOWED_HOSTS` (that is why the demo needs it: `localhost` on a laptop, `demo-mcp` in Docker
+  Compose). Not covered: DNS rebinding between the check and the connection; use an egress rule for that.
 - Tool answers are written by the model from the tool result and are **not** verified the way document
   answers are; the raw result is always shown next to the answer.

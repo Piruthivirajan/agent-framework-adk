@@ -4,15 +4,15 @@ Source of truth for scope: [PLAN.md](PLAN.md). Update this file after every task
 
 ## Must have
 
-- [ ] Plugin framework: `AgentPlugin`, registry, coordinator built from plugins
-- [ ] RAG agent: MongoDB hybrid retrieval, cross-encoder rerank, citations
-- [ ] Grounding gate: "Not found in the reference documents" below the rerank threshold
-- [ ] File agent: Tika parsing, single pass for small input, map-reduce for large
-- [ ] Routing: attachment goes to the file agent by rule; text goes through the coordinator LLM
-- [ ] MCP settings page: URL + auth header, test connection, tools loaded at runtime
-- [ ] Credential hygiene: masked in UI and API, never logged, never sent to the model
-- [ ] Graceful failures: wrong MCP URL or token, MCP server down, Gemini timeout each show a clear UI message ("Invalid credentials", "Unable to connect to MCP server"), never a stack trace
-- [ ] Trace panel under each answer: route chosen, tool calls, vector and BM25 hit counts, fused top 20, rerank scores, latency per stage
+- [x] Plugin framework: `AgentPlugin`, registry, coordinator built from plugins
+- [x] RAG agent: MongoDB hybrid retrieval, cross-encoder rerank, citations
+- [x] Grounding gate: "Not found in the reference documents" below the rerank threshold
+- [x] File agent: Tika parsing, single pass for small input, map-reduce for large
+- [x] Routing: attachment goes to the file agent by rule; text goes through the coordinator LLM
+- [x] MCP settings page: URL + auth header, test connection, tools loaded at runtime
+- [x] Credential hygiene: masked in UI and API, never logged, never sent to the model
+- [x] Graceful failures: wrong MCP URL or token, MCP server down, Gemini timeout each show a clear UI message ("Invalid credentials", "Unable to connect to MCP server"), never a stack trace
+- [x] Trace panel under each answer: route chosen, tool calls, vector and BM25 hit counts, fused top 20, rerank scores, latency per stage
 - [ ] Small eval: 15 to 20 golden questions, precision@5 for `$rankFusion` vs `$scoreFusion`
 - [ ] Reachable deployment with a seeded corpus
 
@@ -112,6 +112,13 @@ Decisions (user): file agent shape decided by the step 0 spike; **two paths** to
 ## Log
 
 <!-- Newest first. One entry per task: date, what was built, what was verified. -->
+
+### 2026-10-11: Day 7 prep (no cloud actions): SSRF guard, deployment files, README draft
+- **SSRF guard (`McpUrlGuard`, `agentfw.mcp.allowed-hosts` / `AGENTFW_MCP_ALLOWED_HOSTS`):** an MCP URL whose host resolves to any private (RFC 1918), loopback, link-local (169.254.0.0/16, fe80::/10, the cloud metadata address), carrier-grade NAT (100.64/10), benchmarking, reserved, multicast, unspecified, unique-local (fc00::/7), 6to4 or NAT64 address is refused, including IPv4 written as a number, mapped into IPv6, or with credentials in the URL; a host written only in digits that does not resolve (hex, octal) is refused too (fail closed). The allowlist exempts a host by name only (`demo-mcp`, `localhost`); the address it resolves to is not exempt for other names. Applied at test, save, update and again before each connection. UI and API say: "This address is not allowed: ... the administrator must allow its host name in AGENTFW_MCP_ALLOWED_HOSTS" (400 `BLOCKED_ADDRESS`; the test endpoint returns it as the test error). **Tests:** 36 (25 blocked literals, 7 public literals, allowlist semantics, registry save/test/update). **Limits stated:** DNS rebinding between the check and the SDK's own resolution is not covered, and the SDK's HTTP client may follow redirects (the probe does not); an egress rule is the complete answer.
+- **Deployment files (not yet run on a VM):** `Dockerfile` (multi-stage: Maven build, then a JRE image with the model downloaded from the pinned commit and verified by sha256 at build time; runs non-root; health check on `/actuator/health`), `docker-compose.prod.yml` (Caddy, app, atlas-local 8.3.11 with named volumes, optional demo MCP server under the `demo` profile; only Caddy publishes ports 80 and 443), `deploy/Caddyfile` (automatic HTTPS, `flush_interval -1` so SSE is not buffered, no `encode`, 25 MB body limit, 15 min response timeout, HSTS, CSP), `scripts/deploy.sh` (fresh Ubuntu: Docker, `.env`, DOMAIN from the public IP as `<ip-with-dashes>.sslip.io`, corpus fetch with sha256, ufw 22/80/443, build and start, wait for health, wait for ingestion), `scripts/fetch-model.sh`, `.env.example` with every variable, `.dockerignore` (no secrets, models or corpus in the image). `ModelFetchScriptTest` fails if the script's commit or hashes differ from `ModelFiles`, and checks the local model files against them. New explicit placeholders in `application.yml`: `AGENTFW_INGESTION_ON_STARTUP`, `AGENTFW_COOKIE_SECURE` (the session cookie `Secure` flag, true in the deployment), `AGENTFW_FORWARD_HEADERS` (`native` behind Caddy, so the login lockout counts the real client address), `AGENTFW_MCP_ALLOWED_HOSTS`.
+- **Validated without a build:** `docker compose config` accepts the file with and without the demo profile and refuses to start with a message when a required variable is missing; both scripts pass `bash -n`; the demo MCP server got `--bind` (0.0.0.0 inside a container). **Not validated:** `docker build`, the Caddy certificate, `deploy.sh` on Ubuntu: they need downloads (base images, Maven dependencies, the 91 MB model) and a VM.
+- **README.md draft:** what it is, the four scenarios, run locally, architecture (mermaid), code map, design decisions with evidence, evaluation tables with **[FINAL RUN]** placeholders, limitations, production next steps, operations and settings. `docs/DEPLOY.md`: exactly what the VM needs (Ubuntu 24.04 x86_64, 4 vCPU, 8 GB, 40 GB, ports 22 from your IP and 80, 443 open, nothing else), the steps, the checks, and operating notes.
+- **Open for the final day:** (1) `$rankFusion` vs `$scoreFusion` precision comparison, the one unticked "Must have" eval item; it is retrieval only (no model calls): `--agentfw.calibration.run=true --agentfw.retrieval.fusion=SCORE` into `docs/FUSION.md`; (2) the single final 48-question run into `docs/END_TO_END.md`; (3) rerank latency on the VM; (4) fill the **[FINAL RUN]** cells in README.md; (5) the cloud Atlas version check is moot (the VM runs atlas-local 8.3.11, which has `$scoreFusion`).
 
 ### 2026-10-11: Day 6 step 5, demo login; and a dead-page bug caught by the browser check
 - **Login (`com.demo.agentfw.auth`):** one shared password from `AGENTFW_DEMO_PASSWORD` (`agentfw.auth.password`). Empty means open, with a startup WARN ("open to anyone who can reach it"); set, **the whole application is behind it**: an API call without a session gets `401 LOGIN_REQUIRED` JSON, a page is redirected to `/login.html`; only the login page, `POST /api/login`, `GET /api/me` and `/actuator/health` (for Docker and load balancer probes) are open. Pages that receive a 401 (an expired session) send the user to the login page; a "Sign out" button appears when a password is set.

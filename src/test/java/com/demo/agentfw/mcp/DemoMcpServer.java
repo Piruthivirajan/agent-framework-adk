@@ -42,8 +42,13 @@ public final class DemoMcpServer {
     private final Map<String, LinkedBlockingQueue<String>> sseSessions = new ConcurrentHashMap<>();
 
     public DemoMcpServer(int port, String token) throws IOException {
+        this("127.0.0.1", port, token);
+    }
+
+    /** {@code bind} is the interface to listen on: 127.0.0.1 for a laptop, 0.0.0.0 inside a container. */
+    public DemoMcpServer(String bind, int port, String token) throws IOException {
         this.token = token;
-        this.http = HttpServer.create(new InetSocketAddress("127.0.0.1", port), 0);
+        this.http = HttpServer.create(new InetSocketAddress(bind, port), 0);
         http.setExecutor(Executors.newCachedThreadPool());
         http.createContext("/mcp", this::streamable);
         http.createContext("/sse", this::sseOpen);
@@ -65,16 +70,19 @@ public final class DemoMcpServer {
     public static void main(String[] args) throws Exception {
         int port = 8099;
         String token = "demo-secret";
+        String bind = "127.0.0.1";
         for (int i = 0; i < args.length - 1; i++) {
             if (args[i].equals("--port")) {
                 port = Integer.parseInt(args[i + 1]);
             } else if (args[i].equals("--token")) {
                 token = args[i + 1];
+            } else if (args[i].equals("--bind")) {
+                bind = args[i + 1];
             }
         }
-        DemoMcpServer server = new DemoMcpServer(port, token);
+        DemoMcpServer server = new DemoMcpServer(bind, port, token);
         server.start();
-        System.out.println("Demo MCP server on http://localhost:" + port);
+        System.out.println("Demo MCP server listening on " + bind + ":" + port);
         System.out.println("  Streamable HTTP : http://localhost:" + port + "/mcp");
         System.out.println("  legacy SSE      : http://localhost:" + port + "/sse");
         System.out.println("  header          : Authorization: Bearer " + token);

@@ -1,10 +1,13 @@
 server:
+  # none | native | framework. "native" (behind the Caddy proxy) makes the client address the one in
+  # X-Forwarded-For, so the login lockout counts the real client and not the proxy.
+  forward-headers-strategy: ${AGENTFW_FORWARD_HEADERS:none}
   servlet:
     session:
       cookie:
         http-only: true
         same-site: lax          # no cross-site form post can ride on the session
-        # secure: true          # set when the application is served over https (behind a TLS proxy)
+        secure: ${AGENTFW_COOKIE_SECURE:false}   # true when served over https (the deployment sets it)
       timeout: 8h
 
 spring:
@@ -61,6 +64,10 @@ agentfw:
     rewrite-follow-ups: false    # a separate rewrite call (+2.5 to 4.5 s per turn); the coordinator now restates follow-ups itself
     history-turns: 4
     max-sessions: 500
+  mcp:
+    # Hosts that may be used as MCP server addresses although they are on a private or local network
+    # (the demo MCP server). Everything private, loopback or link-local is refused otherwise (SSRF guard).
+    allowed-hosts: ${AGENTFW_MCP_ALLOWED_HOSTS:}
   auth:
     # The demo login. Empty = the application is open (fine on a laptop, not on a reachable host).
     password: ${AGENTFW_DEMO_PASSWORD:}
@@ -92,7 +99,7 @@ agentfw:
     high-confidence-score: 3.3
   ingestion:
     corpus-dir: corpus
-    on-startup: false
+    on-startup: ${AGENTFW_INGESTION_ON_STARTUP:false}   # true in the deployment: seeds the corpus at start (idempotent)
     chunk-target-tokens: 650
     chunk-overlap-percent: 15
     chunk-min-tail-tokens: 100

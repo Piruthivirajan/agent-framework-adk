@@ -1,0 +1,91 @@
+# Production stack: Caddy (HTTPS) -> app -> MongoDB Atlas local. One VM, Docker Compose.
+#
+#   docker compose -f docker-compose.prod.yml up -d --build            # app only
+#   COMPOSE_PROFILES=demo docker compose -f docker-compose.prod.yml up -d --build   # + the demo MCP server
+#
+# scripts/deploy.sh does everything for a fresh Ubuntu VM. Only Caddy publishes ports (80, 443).
+# The variables come from .env (see .env.example); a missing required one stops `up` with a message.
+name: agentfw
+
+services:
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"        # HTTP/3
+    environment:
+      DOMAIN: ${DOMAIN:?set DOMAIN in .env (scripts/deploy.sh derives it from the public IP)}
+      ACME_EMAIL: ${ACME_EMAIL:?set ACME_EMAIL in .env (certificate expiry notices go there)}
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data         # certificates: keep, or Let's Encrypt rate limits bite on re-creation
+      - caddy-config:/config
+    depends_on:
+      app:
+        condition: service_healthy
+
+  app:
+    build:
+      context: .
+    image: agentfw-app:latest
+    restart: unless-stopped
+    # the owner of ./corpus on the host, so that "Add to knowledge base" can write there
+    user: "${APP_UID:-1000}:${APP_GID:-1000}"
+    environment:
+      GOOGLE_API_KEY: ${GOOGLE_API_KEY:?set GOOGLE_API_KEY in .env}
+      AGENTFW_DEMO_PASSWORD: ${AGENTFW_DEMO_PASSWORD:?set AGENTFW_DEMO_PASSWORD in .env}
+      SPRING_MONGODB_URI: mongodb://mongodb:27017/agentfw?directConnection=true
+      AGENTFW_INGESTION_ON_STARTUP: "true"      # idempotent: unchanged PDFs cost no API call on restart
+      AGENTFW_COOKIE_SECURE: "true"             # served over https by Caddy
+      AGENTFW_FORWARD_HEADERS: native           # the login lockout counts the real client address
+      AGENTFW_MCP_ALLOWED_HOSTS: ${AGENTFW_MCP_ALLOWED_HOSTS:-}
+    volumes:
+      - ./corpus:/app/corpus
+    expose:
+      - "8080"
+    depends_on:
+      mongodb:
+        condition: service_healthy
+
+  mongodb:
+    # Pinned: MongoDB 8.3.11, build of 2026-09-28 (the plain tag is re-pushed; the timestamped one is not).
+    image: mongodb/mongodb-atlas-local:8.3.11-20260928T091948Z
+    restart: unless-stopped
+    # A fixed hostname keeps the replica set usable after the container is re-created (see docker-compose.yml).
+    hostname: agentfw-mongo
+    volumes:
+      - atlas-db:/data/db
+      - atlas-configdb:/data/configdb
+      - atlas-mongot:/data/mongot        # search indexes live here; without it a re-created container loses them
+    # no ports: the database is reachable from the app only
+
+  # Optional demo MCP server for scenario D: COMPOSE_PROFILES=demo. Then add
+  # http://demo-mcp:8099/mcp with the header "Authorization: Bearer <DEMO_MCP_TOKEN>" in the MCP settings.
+  # AGENTFW_MCP_ALLOWED_HOSTS=demo-mcp must be set, or the SSRF guard refuses the private address.
+  # The server is reachable inside the compose network only (nothing is published).
+  demo-mcp:
+    profiles: ["demo"]
+    image: eclipse-temurin:21-jre
+    restart: unless-stopped
+    command:
+      - java
+      - /demo/DemoMcpServer.java
+      - --bind
+      - 0.0.0.0
+      - --port
+      - "8099"
+      - --token
+      - ${DEMO_MCP_TOKEN:-demo-secret}
+    volumes:
+      - ./src/test/java/com/demo/agentfw/mcp:/demo:ro
+    expose:
+      - "8099"
+
+volumes:
+  atlas-db:
+  atlas-configdb:
+  atlas-mongot:
+  caddy-data:
+  caddy-config:
