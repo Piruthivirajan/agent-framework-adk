@@ -36,7 +36,13 @@ public record ChatResult(
      * @param problems          reasons the verifier rejected the answer (empty when it passed or when the model
      *                          itself said NOT_FOUND)
      * @param modelSaidNotFound the model answered NOT_FOUND by itself
+     * @param repaired          the agent's first output was malformed JSON and the verified text is the
+     *                          result of the one allowed repair
      */
-    public record Verification(List<String> problems, boolean modelSaidNotFound) {
+    public record Verification(List<String> problems, boolean modelSaidNotFound, boolean repaired) {
+
+        public Verification(List<String> problems, boolean modelSaidNotFound) {
+            this(problems, modelSaidNotFound, false);
+        }
     }
 }

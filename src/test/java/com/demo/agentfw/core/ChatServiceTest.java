@@ -1,6 +1,7 @@
 package com.demo.agentfw.core;
 
 import com.demo.agentfw.agents.rag.GroundingVerifier;
+import com.demo.agentfw.agents.rag.MalformedAnswerRepair;
 import com.demo.agentfw.agents.rag.RagAgentPlugin;
 import com.demo.agentfw.agents.rag.RagProperties;
 import com.demo.agentfw.agents.rag.RetrievalLedger;
@@ -37,6 +38,9 @@ class ChatServiceTest {
         final RetrievalLedger ledger = new RetrievalLedger();
         final AtomicReference<String> ragFinal = new AtomicReference<>("{\"status\":\"NOT_FOUND\"}");
         final AtomicReference<String> coordinatorProse = new AtomicReference<>("coordinator prose");
+        final AtomicReference<String> repairReply = new AtomicReference<>("{\"status\":\"NOT_FOUND\"}");
+        final java.util.concurrent.atomic.AtomicInteger repairCalls = new java.util.concurrent.atomic.AtomicInteger();
+        final AtomicReference<String> repairInput = new AtomicReference<>();
         final ChatService chat;
 
         Rig(DoubleUnaryOperator score, boolean ragIsFinalAnswer) {
@@ -62,7 +66,12 @@ class ChatServiceTest {
             };
             CoordinatorFactory coordinators = new CoordinatorFactory(new AgentRegistry(List.of(plugin)), factory,
                     new LlmProperties("fake", "scripted", "", null, null, 12));
-            chat = new ChatService(coordinators, ledger, new GroundingVerifier(ledger));
+            MalformedAnswerRepair repairer = new MalformedAnswerRepair((system, user) -> {
+                repairCalls.incrementAndGet();
+                repairInput.set(user);
+                return repairReply.get();
+            });
+            chat = new ChatService(coordinators, ledger, new GroundingVerifier(ledger), repairer);
             llm.script(this::respond);
         }
 
@@ -149,6 +158,68 @@ class ChatServiceTest {
         assertThat(r.verification().problems().get(0)).contains("number(s) [1000]");
     }
 
+    /** The slip seen live: the closing quote of "ref" is lost and the key name is swallowed into the value. */
+    private static final String SLIPPED = "{\"status\":\"ANSWERED\",\"claims\":[{\"text\":\"The AWS "
+            + "Well-Architected Tool provides a consistent process to review workloads.\",\"ref\":\"r1c1,quote\":\""
+            + TOOL_QUOTE + "\"}]}";
+
+    @Test
+    void malformedJsonIsRepairedOnceAndTheRepairedAnswerIsStillVerified() {
+        Rig rig = new Rig(i -> 5.0 - i, true);
+        rig.ragFinal.set(SLIPPED);
+        rig.repairReply.set(GOOD_ANSWER);
+
+        ChatResult r = rig.chat.chat("tab-1", "What is the AWS Well-Architected Tool?");
+
+        assertThat(rig.repairCalls.get()).isEqualTo(1);
+        assertThat(rig.repairInput.get()).contains("r1c1,quote");             // the model is shown its own output
+        assertThat(r.grounded()).isTrue();
+        assertThat(r.verification().repaired()).isTrue();
+        assertThat(r.answer()).contains("[wellarchitected-framework.pdf, p. 7]");
+    }
+
+    @Test
+    void aRepairCannotLaunderAFabricatedQuote() {
+        Rig rig = new Rig(i -> 5.0 - i, true);
+        rig.ragFinal.set(SLIPPED);
+        rig.repairReply.set(GOOD_ANSWER.replace(TOOL_QUOTE, "is a managed service that also stores your invoices"));
+
+        ChatResult r = rig.chat.chat("tab-1", "What is the AWS Well-Architected Tool?");
+
+        assertThat(r.grounded()).isFalse();
+        assertThat(r.answer()).isEqualTo("Not found in the reference documents.");
+        assertThat(r.verification().repaired()).isTrue();
+        assertThat(r.verification().problems().get(0)).contains("quote not found");
+    }
+
+    @Test
+    void theRetryIsOneShotAndAStillMalformedRepairIsRejected() {
+        Rig rig = new Rig(i -> 5.0 - i, true);
+        rig.ragFinal.set(SLIPPED);
+        rig.repairReply.set(SLIPPED);
+
+        ChatResult r = rig.chat.chat("tab-1", "What is the AWS Well-Architected Tool?");
+
+        assertThat(rig.repairCalls.get()).isEqualTo(1);
+        assertThat(r.grounded()).isFalse();
+        assertThat(r.answer()).isEqualTo("Not found in the reference documents.");
+    }
+
+    @Test
+    void onlyMalformedJsonIsRetriedNotAFailedVerificationNorProse() {
+        Rig badQuote = new Rig(i -> 5.0 - i, true);
+        badQuote.ragFinal.set(GOOD_ANSWER.replace(TOOL_QUOTE, "is a managed service that also stores your invoices"));
+        badQuote.chat.chat("tab-1", "q");
+        Rig prose = new Rig(i -> 5.0 - i, true);
+        prose.ragFinal.set("I could not find that in the documents.");
+        ChatResult r = prose.chat.chat("tab-1", "q");
+
+        assertThat(badQuote.repairCalls.get()).isZero();
+        assertThat(prose.repairCalls.get()).isZero();
+        assertThat(r.grounded()).isFalse();
+        assertThat(r.verification().repaired()).isFalse();
+    }
+
     @Test
     void coordinatorProseIsIgnoredEvenWhenItWouldSoundHelpful() {
         // the RAG agent is NOT a final-answer agent here, so the coordinator speaks again after the tool
@@ -217,7 +288,10 @@ class ChatServiceTest {
         };
         CoordinatorFactory coordinators = new CoordinatorFactory(new AgentRegistry(List.of(rag, new ProseAgent())),
                 factory, new LlmProperties("fake", "scripted", "", null, null, 12));
-        ChatService chat = new ChatService(coordinators, ledger, new GroundingVerifier(ledger));
+        ChatService chat = new ChatService(coordinators, ledger, new GroundingVerifier(ledger),
+                new MalformedAnswerRepair((system, user) -> {
+                    throw new IllegalStateException("no repair expected");
+                }));
         llm.script(req -> req.tools().containsKey("prose_agent")
                 ? ScriptedLlm.call("prose_agent", Map.of("request", "q"))      // the coordinator picks the other agent
                 : ScriptedLlm.text("Lambda allows 1,000 concurrent executions, unverified."));

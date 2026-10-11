@@ -108,7 +108,8 @@ class RagAgentPluginTest {
                 .contains("{\"status\":\"NOT_FOUND\"}")
                 .contains("\"quote\"")
                 .contains("verbatim")
-                .contains("Any number in a claim's text must also appear in its quote");
+                .contains("Every number in a claim's text must appear in that claim's quote")
+                .contains("EC2 or Route 53");
     }
 
     @Test

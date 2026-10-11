@@ -1,6 +1,7 @@
 package com.demo.agentfw.core;
 
 import com.demo.agentfw.agents.rag.GroundingVerifier;
+import com.demo.agentfw.agents.rag.MalformedAnswerRepair;
 import com.demo.agentfw.agents.rag.RagAgentPlugin;
 import com.demo.agentfw.agents.rag.RetrievalLedger;
 import com.demo.agentfw.agents.rag.SearchDocumentsTool;
@@ -48,11 +49,14 @@ public class ChatService {
     private final CoordinatorFactory coordinators;
     private final RetrievalLedger ledger;
     private final GroundingVerifier verifier;
+    private final MalformedAnswerRepair repair;
 
-    public ChatService(CoordinatorFactory coordinators, RetrievalLedger ledger, GroundingVerifier verifier) {
+    public ChatService(CoordinatorFactory coordinators, RetrievalLedger ledger, GroundingVerifier verifier,
+                       MalformedAnswerRepair repair) {
         this.coordinators = coordinators;
         this.ledger = ledger;
         this.verifier = verifier;
+        this.repair = repair;
     }
 
     /** A turn failed before an answer existed (the model could not be reached, a limit was hit). */
@@ -98,9 +102,21 @@ public class ChatService {
 
         ChatResult result;
         if (ragOutput.isPresent()) {
-            GroundingVerifier.Verified v = verifier.verify(ragOutput.get(), requestId);
+            String output = ragOutput.get();
+            boolean repaired = false;
+            if (verifier.isMalformedJson(output)) {
+                // the one retry: only for output that is not the JSON object at all
+                Optional<String> fixed = repair.repair(output);
+                log.info("chat request={} malformed model output, repair {}", requestId,
+                        fixed.isPresent() ? "returned text" : "failed");
+                if (fixed.isPresent()) {
+                    output = fixed.get();
+                    repaired = true;
+                }
+            }
+            GroundingVerifier.Verified v = verifier.verify(output, requestId);
             result = new ChatResult(v.answer(), RagAgentPlugin.NAME, v.grounded(), v.sources(), traces,
-                    new ChatResult.Verification(v.problems(), v.modelSaidNotFound()), toolCalls, ragOutput.get(),
+                    new ChatResult.Verification(v.problems(), v.modelSaidNotFound(), repaired), toolCalls, output,
                     requestId, millisSince(start));
         } else if (toolCalls.isEmpty()) {
             result = new ChatResult(NO_TOOL_REPLY, "none", false, List.of(), traces,

@@ -46,6 +46,20 @@ class GroundingVerifierTest {
     // ---- accepted -------------------------------------------------------------------------------
 
     @Test
+    void onlyAnObjectThatLooksLikeJsonButDoesNotParseCountsAsMalformedJson() {
+        String slipped = "{\"status\":\"ANSWERED\",\"claims\":[{\"text\":\"t\",\"ref\":\"r1c3,quote\":\"q\"}]}";
+
+        assertThat(verifier.isMalformedJson(slipped)).isTrue();
+        assertThat(verifier.isMalformedJson("```json\n{\"status\":\"NOT_FOUND\"}\n```")).isFalse();  // parses
+        assertThat(verifier.isMalformedJson("{\"status\":\"NOT_FOUND\"}")).isFalse();
+        assertThat(verifier.isMalformedJson("I could not find that.")).isFalse();                      // prose
+        assertThat(verifier.isMalformedJson("} before {")).isFalse();
+        assertThat(verifier.isMalformedJson(null)).isFalse();
+        assertThat(verifier.isMalformedJson(answer(claim("t", "nope", "a quote that is long enough here"))))
+                .isFalse();                                                                           // parses; fails later
+    }
+
+    @Test
     void acceptsAClaimWhoseQuoteIsInTheChunkAndRendersFileAndPageFromTheLedger() {
         GroundingVerifier.Verified v = verifier.verify(
                 answer(claim("The tool provides a consistent review process.", "r1c1", TOOL_QUOTE)), REQ);

@@ -42,7 +42,7 @@ public class RagAgentPlugin implements AgentPlugin {
             - Every statement of your answer is its own claim with its own ref and its own quote. Use at most 6 claims.
             - The quote must appear verbatim in the chunk with that ref: copy it exactly, including punctuation, \
             and never join text from different places or correct it.
-            - Any number in a claim's text must also appear in its quote.
+            - Every number in a claim's text must appear in that claim's quote, including digits inside names             such as EC2 or Route 53. If the quote does not contain a number or a name with a digit, leave that             detail out of the claim.
             - A claim that you cannot support with a quote must not be made.
             """;
 

@@ -76,6 +76,19 @@ public class GroundingVerifier {
         this.ledger = ledger;
     }
 
+    /**
+     * True when the output looks like a JSON object (it has braces) but does not parse: a syntax slip.
+     * This is the one failure that is retried once. Prose without braces, and every verification
+     * failure of a parseable object, are final.
+     */
+    public boolean isMalformedJson(String modelOutput) {
+        if (modelOutput == null) {
+            return false;
+        }
+        int from = modelOutput.indexOf('{');
+        return from >= 0 && modelOutput.lastIndexOf('}') > from && parse(modelOutput).isEmpty();
+    }
+
     public Verified verify(String modelOutput, String requestId) {
         Optional<RawAnswer> parsed = parse(modelOutput);
         if (parsed.isEmpty()) {

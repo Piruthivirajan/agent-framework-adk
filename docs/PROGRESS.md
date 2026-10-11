@@ -80,7 +80,7 @@ Retrieval gate (done, Day 3): a low **floor** at -6.5 removes only clear junk; 3
 Decisions (user): file agent shape decided by the step 0 spike; **two paths** to the file agent: an attachment goes to it by code (fast path, no coordinator call), and the coordinator also gets it as a tool taking the `fileId` of a file already uploaded in this session (follow-ups such as "shorter" or "what does that file say about X"); no `llmRoutable=false`. Summaries are labelled and not quote-verified (`grounded=false`). Pasted content goes through the same upload endpoint. Limits start at about 1M extracted characters (500k would reject the 300+ page framework PDF) and are set from the step 6 measurement. Verifier: retry once for malformed JSON only, numeric rule stays strict, and the RAG prompt states that every number in a claim must appear in its quote. SSE stage events for chat as well ("routing", "searching", "reranking", "verifying"). "Add to knowledge base" is separate from the chat attachment. Follow-up questions are rewritten into a standalone query from the chat history before they reach the RAG agent (its session is isolated).
 
 - [x] 0. ADK spike: file agent shape (LlmAgent + tool vs custom BaseAgent), a tool that calls the model, cost of the extra call
-- [ ] 1. Verifier: one retry for malformed JSON, RAG prompt line on numbers, measured on the same 48 questions
+- [x] 1. Verifier: one retry for malformed JSON, RAG prompt line on numbers, measured on the same 48 questions
 - [ ] 2. Uploads: Tika parsing, `uploads` collection (TTL), limits, error messages
 - [ ] 3. `MapReduceSummarizer` (single pass, map-reduce, hierarchical reduce, failure behaviour)
 - [ ] 4. `FileAgentPlugin`, fast path by code, coordinator tool with session files, summaries labelled
@@ -97,6 +97,13 @@ Decisions (user): file agent shape decided by the step 0 spike; **two paths** to
 ## Log
 
 <!-- Newest first. One entry per task: date, what was built, what was verified. -->
+
+### 2026-10-11: Day 5 step 1, one retry for malformed JSON, number line in the RAG prompt
+- **What:** when the RAG agent's output has braces but is not parseable JSON (the slip seen live: `"ref":"r1c3,quote":"..."`), `ChatService` makes **one** model call (`MalformedAnswerRepair`) that shows the model its own output and asks for the same object with only the syntax fixed; the repaired text then goes through the unchanged `GroundingVerifier`, so a repair cannot add an unverified claim (tested: a repair that changes a quote is rejected). Not retried: prose without braces, an unknown ref, a quote not in the chunk, a number not in its quote. A failed or still-malformed repair means the not-found sentence. `ChatResult.Verification.repaired` records it.
+- **Prompt:** every number in a claim, including digits inside names such as EC2 or Route 53, must appear in that claim's quote; otherwise leave the detail out. The numeric rule itself is unchanged and strict.
+- **New seam:** `TextGenerator` / `LlmTextGenerator` (one plain model call with the agents' thinking budget, no agent, no tools); the summarizer will use it too.
+- **Measured** (`docs/e2e/d5-s1-retry.json`, same 48 questions, defaults cap 2 + early stop): 28 correct (25 strict), 1 false answer, 3 false "not found" (in-21, in-31, in-32, all by the model or the floor), **verifier-caused false "not found": 0 of 32**; median 9.0 s, p90 12.2 s. One malformed output in 48 (in-14), repaired and verified, about +3 s on that turn. Sample caveat: one repair observed live; the earlier runs had 2 malformed in 32 twice and 0 once, so the rate is a few percent, and this run cannot show more than that the path works.
+- Verified: BUILD SUCCESS, 203 tests.
 
 ### 2026-10-11: Day 5 step 0, file agent shape (spike, `src/test/.../spike/FileAgentSpike.java`)
 - **Decision: a custom `BaseAgent` that runs the summarizer in code** (variant B), not an `LlmAgent` with a `summarize_file` tool (variant A). Measured live, `gemini-3.8-flash`, thinking budget 0, a 2,000-character text, 5 repeats:
