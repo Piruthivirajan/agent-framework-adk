@@ -58,7 +58,7 @@ Decisions: `gemini-3.8-flash` for both agents, configurable by name, low thinkin
 - [x] 2. Retrieval tool, `RetrievalLedger`, `RagAgentPlugin` (instruction and JSON contract); rename `GroundingDecision.OK`
 - [x] 3. `GroundingVerifier` (quote and numeric support) and renderer
 - [x] 4. `ChatService` with scripted-model scenario A and B tests
-- [ ] 5. Live scenarios A and B; thinking-budget measurement
+- [x] 5. Live scenarios A and B; thinking-budget measurement
 - [ ] 6. 48-question end-to-end run, `docs/END_TO_END.md`
 
 **Day 6 note (user):** the "final answer comes from the verified `rag_agent` result, coordinator prose ignored, no tool called gives the fixed reply" rule applies to **RAG answers only**. MCP tool answers will need their own path (the coordinator calls MCP tools directly, so its prose is the answer there); do not apply the RAG verifier to them.
@@ -81,6 +81,13 @@ Retrieval gate (done, Day 3): a low **floor** at -6.5 removes only clear junk; 3
 ## Log
 
 <!-- Newest first. One entry per task: date, what was built, what was verified. -->
+
+### 2026-10-11: Day 4 step 5, live scenarios and the thinking-budget measurement
+- **Vehicle:** `EndToEndRunner` (only with `agentfw.e2e.run=true`): asks calibration questions through the real `ChatService`, classifies each (verdict, strict-correct, reason for not answering), saves `docs/e2e/<label>.json`. Retries a failed turn twice with back-off.
+- **Smoke, 8 real questions** (`gemini-3.8-flash`, coordinator budget 128): 7 correct, 1 false "not found". Scenario A: in-04 (WA Tool), in-29 (four DR strategies), in-17 (mechanical sympathy; cites the framework's copy of the page) answered with correct file and page citations and quotes in `sources`. Scenario B: FIFA (rejected at the retrieval floor), Google Cloud Architecture Framework, Lambda concurrency and S3 object size all "Not found in the reference documents"; **in all four the model itself answered NOT_FOUND**, so the verifier had nothing to reject in this sample (its adversarial cases are covered by the scripted tests, not yet observed live). The miss is in-31 (the paraphrase): three searches, best score -0.35, the model judged the chunks did not answer.
+- **Latency:** 9 to 18 s per question, 10 to 12 s for out-of-corpus. It is dominated by the RAG agent searching up to 3 times (each search is about 3 s of retrieval plus a model call); in-29 with one search took 9 s. Not good enough for a live demo without a change (candidates: fewer rewrites, a lower agent thinking budget, caching the query embedding); not changed yet.
+- **Coordinator thinking budget, routing call only** (6 questions x 3 repeats = 18 calls per setting, time to the first tool call): default median 2.64 s / mean 2.71 s; budget 0: 2.09 / 2.48 s; 128: 2.22 / 2.55 s; 1024: 2.04 / 2.37 s. Spreads overlap (p90 3.6 to 4.1 s), so the difference of about 0.4 to 0.5 s between "default" and any explicit budget is suggestive, not established; routing was correct 72 of 72 at every setting. The low budget (128) is kept: it costs nothing measurable and saves a little.
+- Verified: BUILD SUCCESS, 178 tests (verdict rules unit-tested).
 
 ### 2026-10-11: Day 4 step 4, ChatService
 - `ChatService.chat(sessionId, text)` creates the session if needed, runs the coordinator with a per-turn `requestId` as state delta, and decides **in code**: the RAG agent's function response (read from the coordinator's events, key `result`) goes through `GroundingVerifier` and the verified text is the answer; the coordinator's own prose is ignored. No tool called: the fixed reply "I can answer questions about the reference documents, summarize files, or use connected tools. I couldn't find that in the reference documents." (route `none`). The ledger entries of the turn are cleared in `finally`.
