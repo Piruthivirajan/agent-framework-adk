@@ -49,6 +49,20 @@ Decisions: reranker `ms-marco-MiniLM-L6-v2` fp32 as baseline, int8 chosen only i
 
 - **Hosting decision needs a measurement:** rerank latency on a small cloud CPU will be several times the laptop number (about 1.8 s for 20 chunks, single predictor, on an i7-10850H 6C/12T). Measure rerank latency on the target host before choosing the hosting tier; if too slow, options are the int8 model, a smaller rerank depth, or a hosted reranker behind the same `Reranker` interface.
 
+## Day 4: agents (approved plan, each step built, tested and committed)
+
+Decisions: `gemini-3.8-flash` for both agents, configurable by name, low thinking budget on the coordinator (latency measured); numeric-support rule with number-format normalisation; any bad quote replaces the whole answer, no retry for now (measure the false "not found" rate first; if high, test ONE retry that sends the verifier's error back to the RAG agent); the final answer is the verified `rag_agent` result and the coordinator's prose is ignored; when no tool is called the reply is the fixed sentence "I can answer questions about the reference documents, summarize files, or use connected tools. I couldn't find that in the reference documents."; quotes go in a separate `sources` list of the API response, not inline in the answer text.
+
+- [x] 0. API spike (scripted model, one live call)
+- [ ] 1. Plugin framework: `AgentPlugin`, `AgentRegistry`, `CoordinatorFactory`, `ModelFactory`, third-plugin test
+- [ ] 2. Retrieval tool, `RetrievalLedger`, `RagAgentPlugin` (instruction and JSON contract); rename `GroundingDecision.OK`
+- [ ] 3. `GroundingVerifier` (quote and numeric support) and renderer
+- [ ] 4. `ChatService` with scripted-model scenario A and B tests
+- [ ] 5. Live scenarios A and B; thinking-budget measurement
+- [ ] 6. 48-question end-to-end run, `docs/END_TO_END.md`
+
+**Day 6 note (user):** the "final answer comes from the verified `rag_agent` result, coordinator prose ignored, no tool called gives the fixed reply" rule applies to **RAG answers only**. MCP tool answers will need their own path (the coordinator calls MCP tools directly, so its prose is the answer there); do not apply the RAG verifier to them.
+
 ## Day 4 requirements (decided by the user after the Day 3 calibration)
 
 Retrieval gate (done, Day 3): a low **floor** at -6.5 removes only clear junk; 3.3 is recorded as "high confidence" in the trace only. The real grounding decision moves to the answering step:
@@ -67,6 +81,15 @@ Retrieval gate (done, Day 3): a low **floor** at -6.5 removes only clear junk; 3
 ## Log
 
 <!-- Newest first. One entry per task: date, what was built, what was verified. -->
+
+### 2026-10-11: Day 4 step 0, ADK 1.11.0 spike (what was verified, not assumed)
+- **Tool context:** a `FunctionTool` instance method receives the `ToolContext` only if the parameter is named `toolContext` (matched by reflection, so the class must be compiled with `-parameters`, which the Spring Boot parent does). Other parameters need `@Annotations.Schema(name, description)`. `ToolContext` exposes `userId()`, `sessionId()`, `invocationId()`, `agentName()`, `state()`.
+- **Nested agent isolation:** a tool inside an `AgentTool` runs in a new session and user (`tmp-user`, new session id, new invocation id); the parent's identity is not visible. **A state delta passed on the top-level `runAsync(user, session, content, runConfig, Map)` does appear in the nested tool's `state()`**, so a per-request id can correlate the retrieval ledger with the request.
+- **Top-level events carry the answer:** the coordinator's event stream contains the function call `rag_agent{request=...}` and its function response `rag_agent={result=<child agent's final text>}`; `ChatService` can read the RAG answer there.
+- **`AgentTool.create(agent, true)` skips summarization:** the coordinator made 1 model call instead of 2 and the tool response was the final event (`finalResponse=true`).
+- **Run limit:** `RunConfig.builder().maxLlmCalls(n)` (the `set...` variant is deprecated).
+- **Live call through the ADK `Gemini` wrapper works** with `gemini-3.8-flash`. Single-sample latency of a one-word reply: thinking budget default 2.9 s, 0 → 2.3 s, 128 → 1.4 s. One sample each is noise; the real measurement is step 5.
+- The spike is `src/test/java/com/demo/agentfw/spike/AdkSpike.java` (not part of the test run).
 
 ### 2026-10-11: Day 3 finished, floor, high-confidence marker, widened pages, retrieval smoke
 - **Decision C (user):** retrieval is a low floor, the answering step decides. `min-rerank-score` = **-6.5**: the lowest in-corpus top-1 over all 32 questions is -6.38 (in-31), rounded down to the next half point, so it cuts 0 of 32 in-corpus questions. It rejects 9 of the 16 out-of-corpus questions (6 of 6 unrelated, 3 of 6 near-domain, 0 of 4 AWS limit/price questions); the other 7 pass on to the answering step. The floor is not the defence against OUT_AWS; the Day 4 citation-and-quote verifier is. `high-confidence-score` = **3.3** is recorded in the trace only (26 of 32 in-corpus reach it, none of the 16 out-of-corpus; closest 3.17); no behaviour depends on it. The reasoning is in `docs/CALIBRATION.md`.
