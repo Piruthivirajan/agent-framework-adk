@@ -219,7 +219,8 @@ characters.
 
 | | |
 | --- | --- |
-| Deploy on a VM (Docker Compose, HTTPS) | `docs/DEPLOY.md`, `scripts/deploy.sh`, `docker-compose.prod.yml` |
+| Deploy on a VM (Docker Compose, HTTPS), with the ingested data shipped as a dump | `docs/DEPLOY.md`, `scripts/deploy.sh --restore-db`, `scripts/dump-db.sh`, `docker-compose.prod.yml` |
+| Smoke test of a running deployment (19 checks through its public address) | `scripts/smoke-test.py` |
 | Demo MCP server and scenario D | `docs/DEMO_MCP.md` |
 | Progress log with every measurement | `docs/PROGRESS.md` |
 | Live checks against a running app | `scripts/live-routing-check.py`, `live-kb-check.py`, `live-file-summary-check.py`, `live-mcp-check.py` |

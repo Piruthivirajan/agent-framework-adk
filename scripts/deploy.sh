@@ -7,8 +7,11 @@
 #   $EDITOR .env                      # GOOGLE_API_KEY, AGENTFW_DEMO_PASSWORD, ACME_EMAIL
 #   scripts/deploy.sh                 # second run: does the deployment
 #
-# Options:  --demo          also start the demo MCP server (scenario D)
-#           --no-firewall   do not touch ufw
+# Options:  --demo               also start the demo MCP server (scenario D)
+#           --no-firewall        do not touch ufw
+#           --restore-db FILE    restore the chunks (with their embeddings) from an archive made by
+#                                scripts/dump-db.sh instead of embedding the corpus here: no Gemini
+#                                quota is needed at deploy time. Without it, normal ingestion runs.
 # Safe to run again: it rebuilds and restarts what changed and skips what is already done.
 set -euo pipefail
 
@@ -16,13 +19,22 @@ cd "$(dirname "$0")/.."
 COMPOSE=(docker compose -f docker-compose.prod.yml)
 WITH_DEMO=false
 FIREWALL=true
-for arg in "$@"; do
-  case "$arg" in
+RESTORE_DB=""
+while [[ $# -gt 0 ]]; do
+  case "$1" in
     --demo) WITH_DEMO=true ;;
     --no-firewall) FIREWALL=false ;;
-    *) echo "unknown option: $arg" >&2; exit 2 ;;
+    --restore-db)
+      [[ $# -ge 2 ]] || { echo "--restore-db needs a file" >&2; exit 2; }
+      RESTORE_DB="$2"; shift ;;
+    *) echo "unknown option: $1" >&2; exit 2 ;;
   esac
+  shift
 done
+if [[ -n "$RESTORE_DB" && ! -f "$RESTORE_DB" ]]; then
+  echo "restore archive not found: $RESTORE_DB" >&2
+  exit 2
+fi
 
 say() { printf '\n==> %s\n' "$*"; }
 die() { printf 'ERROR: %s\n' "$*" >&2; exit 1; }
@@ -63,6 +75,7 @@ if ! docker info >/dev/null 2>&1; then
   if [[ -n "$SUDO" ]] && $SUDO docker info >/dev/null 2>&1; then
     COMPOSE=($SUDO docker compose -f docker-compose.prod.yml)
     docker() { $SUDO docker "$@"; }
+    export DOCKER="$SUDO docker"        # for the helper scripts, which run as separate processes
   else
     die "cannot talk to the Docker daemon"
   fi
@@ -119,6 +132,21 @@ if $FIREWALL && command -v ufw >/dev/null 2>&1; then
   # publishes nothing except Caddy's 80 and 443.
 fi
 
+# ---- 4b. restore the database (optional) ------------------------------------------------------------
+if [[ -n "$RESTORE_DB" ]]; then
+  say "Starting MongoDB and restoring the database from $RESTORE_DB (no embedding calls)"
+  "${COMPOSE[@]}" up -d mongodb
+  mcid="$("${COMPOSE[@]}" ps -q mongodb)"
+  mstatus="starting"
+  for i in $(seq 1 60); do
+    mstatus="$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' "$mcid" 2>/dev/null || echo unknown)"
+    if [[ "$mstatus" == "healthy" ]]; then break; fi
+    sleep 5
+  done
+  [[ "$mstatus" == "healthy" ]] || die "MongoDB did not become healthy (status: $mstatus)"
+  bash scripts/restore-db.sh "$RESTORE_DB" "$mcid"
+fi
+
 # ---- 5. build and start -------------------------------------------------------------------------------
 say "Building the image (downloads the model and verifies its sha256) and starting the stack"
 "${COMPOSE[@]}" up -d --build
@@ -137,7 +165,7 @@ if [[ "$status" != "healthy" ]]; then
 fi
 
 # ---- 7. wait for ingestion ----------------------------------------------------------------------------
-say "Waiting for the corpus to be ingested (first run: a few minutes of embedding calls)"
+say "Waiting for the ingestion check (restored data: every document is found up to date; otherwise a few minutes of embedding calls)"
 for i in $(seq 1 120); do
   if "${COMPOSE[@]}" logs app 2>/dev/null | grep -q "Ingestion finished"; then
     "${COMPOSE[@]}" logs app 2>/dev/null | grep "Ingestion finished" | tail -1 | sed 's/^.*Ingestion finished/Ingestion finished/'

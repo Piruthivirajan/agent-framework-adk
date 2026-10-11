@@ -33,13 +33,36 @@ Premium 4 GB / 2 vCPU for a tight budget, AWS `m6i.large` (2 vCPU / 8 GB) or `c6
 
 ## Steps
 
+**Recommended: ship the data you already ingested** (the VM then has exactly the data the evaluation ran on,
+and needs no embedding quota at deploy time; only the chat model uses the Gemini key afterwards):
+
 ```bash
+# on your laptop, with the local MongoDB container running and the corpus ingested
+bash scripts/dump-db.sh              # -> deploy/seed/agentfw-chunks.archive.gz (+ .sha256, .manifest.json), 13 MB
 # on the VM, as a normal user with sudo
 git clone <your repository URL> agentfw && cd agentfw
+mkdir -p deploy/seed                 # then from the laptop:
+#   scp deploy/seed/agentfw-chunks.archive.gz* <user>@<vm-ip>:agentfw/deploy/seed/
 bash scripts/deploy.sh               # 1st run: creates .env, prints what to fill in, stops
 nano .env                            # GOOGLE_API_KEY, AGENTFW_DEMO_PASSWORD, ACME_EMAIL
-bash scripts/deploy.sh --demo        # 2nd run: installs Docker, fetches the corpus, builds, starts, ingests
+bash scripts/deploy.sh --demo --restore-db deploy/seed/agentfw-chunks.archive.gz
 ```
+
+**Fallback: ingest on the VM** (omit `--restore-db`): the same command without that option embeds the
+corpus on the VM, about 2,350 passages, which needs Gemini embedding quota and a few minutes.
+
+```bash
+bash scripts/deploy.sh --demo
+```
+
+How the restore works: MongoDB is started first, `scripts/restore-db.sh` loads the `chunks` collection
+(text, metadata and the stored embeddings) with `mongorestore --drop` after verifying the archive's sha256,
+then the application starts. Search indexes are not in a dump: the application's index initializer creates
+them at startup. Its idempotent ingestion then finds every document unchanged (same file hash, embedding
+model and chunking version) and logs `Ingestion finished: ingested=0 skipped=10`, so nothing is embedded.
+If a corpus file differs from the dumped one, only that document is re-ingested: normal ingestion is
+the fallback inside the same run. The archive contains the text of the corpus PDFs, so it is kept out of git
+(`deploy/seed/` is ignored); copy it with `scp`.
 
 `--demo` also starts the demo MCP server for scenario D (leave it out to run without it).
 The script prints the URL (`https://<ip-with-dashes>.sslip.io`), and the first request may take a few
@@ -53,14 +76,18 @@ sha256 mismatch); wait for the application's health check; wait for "Ingestion f
 
 ### After the deployment: the checks to do (and to write down for the README)
 
+0. `AGENTFW_DEMO_PASSWORD=... python3 scripts/smoke-test.py https://<domain> --demo-mcp demo-mcp:8099`
+   (19 checks through the public address: redirect to https, headers, login and cookie flags, SSE
+   delivered while the turn runs, a cited RAG answer, a file summary, the SSRF guard, the wrong-token
+   message, a tool answer). Drop `--demo-mcp` if you did not use `--demo`.
 1. Open the URL, sign in, ask a question from the PDFs. In **How this answer was produced**, read the
    **rerank** time of a search. Record it: it is the number to compare with the laptop's 0.7 s.
 2. Upload a small text file and ask for a summary; add the demo MCP server and ask about order ORD-1001
    (`docs/DEMO_MCP.md`, with the host `demo-mcp`).
 3. `docker compose -f docker-compose.prod.yml ps` shows `app` healthy, `mongodb` healthy.
-4. Gemini quota: the free tier has low requests-per-minute limits; the first ingestion embeds about 2,350
-   passages and may need minutes of retries. A paid key removes the wait. A 429 during a chat shows
-   "The language model is rate limited right now ...".
+4. Gemini quota: with `--restore-db` no embedding calls are made at deploy time. Without it, the first
+   ingestion embeds about 2,350 passages and may need minutes of retries on a free-tier key. A 429 during a
+   chat shows "The language model is rate limited right now ...".
 
 ### Operating it
 
