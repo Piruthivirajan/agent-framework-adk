@@ -34,13 +34,13 @@ class IngestionJobTest {
     }
 
     private IngestionJob newJob(EmbeddingService embeddingService) {
-        return newJob(embeddingService, false);
+        return newJob(embeddingService, 50);
     }
 
-    private IngestionJob newJob(EmbeddingService embeddingService, boolean stripHeaders) {
-        IngestionProperties props = new IngestionProperties(corpus.toString(), false, 50, 15, 10, stripHeaders);
-        return new IngestionJob(new AgentFwProperties(TENANT), props, new PdfLoader(),
-                new RunningHeaderStripper(), new Chunker(props), embeddingService, store);
+    private IngestionJob newJob(EmbeddingService embeddingService, int chunkTargetTokens) {
+        IngestionProperties props = new IngestionProperties(corpus.toString(), false, chunkTargetTokens, 15, 10);
+        return new IngestionJob(new AgentFwProperties(TENANT), props, new PdfLoader(), new Chunker(props),
+                embeddingService, store);
     }
 
     private void writePdf(String fileName, String... pages) throws IOException {
@@ -255,18 +255,18 @@ class IngestionJobTest {
     @Test
     void changingThePipelineReIngestsFilesThatDidNotChange() throws IOException {
         writePdf("a.pdf", longText("alpha"));
-        job.run(corpus);                                   // pipeline: no header stripping
+        job.run(corpus);                                   // chunking: 50 tokens
         embeddings.resetCounters();
         assertThat(job.run(corpus).skipped()).containsExactly("a");   // same pipeline: nothing to do
         assertThat(embeddings.documentCalls()).isZero();
 
-        IngestionResult result = newJob(embeddings, true).run(corpus);   // pipeline changed, file bytes did not
+        IngestionResult result = newJob(embeddings, 60).run(corpus);   // chunking changed, file bytes did not
 
         assertThat(result.ingested()).containsExactly("a");
         assertThat(embeddings.documentCalls()).isEqualTo(1);
         assertThat(store.chunks(TENANT, "a")).extracting(StoredChunk::pipelineVersion)
-                .allMatch(v -> v.contains("strip=true"));
-        assertThat(newJob(embeddings, true).run(corpus).skipped()).containsExactly("a");   // and it sticks
+                .allMatch(v -> v.equals("v1|chunk=60/15/10"));
+        assertThat(newJob(embeddings, 60).run(corpus).skipped()).containsExactly("a");   // and it sticks
     }
 
     @Test
@@ -284,28 +284,5 @@ class IngestionJobTest {
 
         assertThat(result.ingested()).containsExactly("a");
         assertThat(embeddings.documentCalls()).isEqualTo(1);
-    }
-
-    @Test
-    void runningHeadersAreNotInTheStoredChunksWhenStrippingIsOn() throws IOException {
-        String[] topics = {"encryption", "backups", "latency", "quotas", "tagging", "lambda", "queues", "tracing",
-                "budgets", "routing"};
-        String[] pages = new String[10];
-        for (int i = 0; i < pages.length; i++) {
-            pages[i] = "Security Pillar AWS Well-Architected Framework\nBody text of the first page about "
-                    + topics[i] + " explains " + topics[(i + 3) % 10] + " in some detail with " + topics[(i + 6) % 10]
-                    + " examples for readers.";
-        }
-        writePdf("hdr.pdf", pages);
-
-        newJob(embeddings, true).run(corpus);
-        List<StoredChunk> stripped = store.chunks(TENANT, "hdr");
-
-        assertThat(stripped).isNotEmpty();
-        assertThat(stripped).allSatisfy(c -> assertThat(c.text()).doesNotContain("Well-Architected"));
-        assertThat(stripped.get(0).text()).contains("Body text of the first page about encryption");
-
-        newJob(embeddings, false).run(corpus);   // switching back rebuilds with the header kept
-        assertThat(store.chunks(TENANT, "hdr")).anySatisfy(c -> assertThat(c.text()).contains("Well-Architected"));
     }
 }

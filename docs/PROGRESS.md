@@ -42,7 +42,7 @@ Decisions: reranker `ms-marco-MiniLM-L6-v2` fp32 as baseline, int8 chosen only i
 - [x] 1. Reranker: `ModelFiles` (download + sha256), `CrossEncoderReranker`, fp32 vs int8 comparison
 - [x] 2. Retrieval core: `RANK` / `SCORE` / `JAVA_RRF`, config, Mongo integration test
 - [x] 3. `RetrievalTrace` and `RetrievalService` with the grounding gate
-- [ ] 4. Calibration: question set drafted and harness built (**calibration NOT run; waiting for the user's review of `src/main/resources/eval/calibration-questions.json`**), then run it and write `docs/CALIBRATION.md`
+- [ ] 4. Calibration: question set (48), harness, baseline and stripping experiment done (`docs/CALIBRATION.md`); **the grounding threshold is not set yet, it needs a decision between false "not found" and unsupported answers**
 - [ ] 5. Smoke at retrieval level
 
 ## Day 7 notes
@@ -56,6 +56,15 @@ Decisions: reranker `ms-marco-MiniLM-L6-v2` fp32 as baseline, int8 chosen only i
 ## Log
 
 <!-- Newest first. One entry per task: date, what was built, what was verified. -->
+
+### 2026-10-11: Day 3, baseline calibration and the header-stripping experiment
+- **Baseline** (10 documents, 2,353 chunks, 48 questions, headers kept): the answer page is in the final top 5 for 26 of 32 in-corpus questions, at rerank depth 20 and at 12 (no question loses it at 12), so `rerank-depth` is now 12. Answer page in the fused top 20: 29, top 12: 28. Paraphrased questions: 0 of 2. Held-out: 10 of 11 classified correctly at the chosen threshold.
+- **Score groups overlap** (in-corpus lowest -6.38 vs out-of-corpus highest 3.17): no error-free threshold. Best balanced accuracy 0.896 at about 3.33: rejects all 13 calibration negatives, wrongly rejects 5 of 24 in-corpus (in-03, in-17, in-21, in-25, in-31). Highest negatives are the confusable near-domain ones (Google Cloud Architecture Framework 3.17, Azure peering 2.57); of the AWS-specific unanswerable ones only Lambda default concurrency is above 0 (1.14).
+- **Finding:** the MS MARCO cross-encoder gives short definitional "what is X" questions low logits even when the right page is retrieved (in-03, in-17), so an absolute score threshold is a weak gate for them. Options for the user to choose from are listed in the Day 3 summary; none is implemented.
+- **Header/footer stripping** (lines repeated in the top or bottom 3 lines of at least half of a document's pages, digits normalized) removed exactly the repeated headers (1 pattern per document, 3 in the archived microservices PDF) but did not improve recall: final top 5 26 to 24, nothing gained, both losses swaps between near-duplicate pages. **Not kept**; code removed, both runs and the written findings are in `docs/CALIBRATION.md` and `docs/calibration/`.
+- **Kept from that work:** a pipeline fingerprint (`v1|chunk=650/15/100`) stored on every chunk and compared by the skip check, so changing the chunking settings or the algorithm version re-ingests files whose bytes did not change; chunks stored before it existed count as legacy and are rebuilt once. The database was re-ingested to the final pipeline (2,353 chunks, second run skips all 10).
+- Harness additions: saved runs, side-by-side report with hand-written findings, `render-only` mode that redraws a report from saved runs without calling any API.
+- Verified: BUILD SUCCESS, 112 tests.
 
 ### 2026-10-11: Day 3, corpus grown to 10 documents, question set extended
 - Added to `scripts/corpus-manifest.tsv` (sha256 each): `wellarchitected-cost-optimization-pillar.pdf` (155 pages), `wellarchitected-sustainability-pillar.pdf` (97 pages) and `disaster-recovery-workloads-on-aws.pdf` (40 pages, "Disaster Recovery of Workloads on AWS: Recovery in the Cloud", current edition, not archived). Chosen whitepaper: it is official and current, and it adds concrete, nameable content (four DR strategies: backup and restore, pilot light, warm standby, multi-site active/active; AWS Elastic Disaster Recovery) on a topic the reliability pillar only touches, which makes crisp questions and a realistic place for an evaluator to ask.

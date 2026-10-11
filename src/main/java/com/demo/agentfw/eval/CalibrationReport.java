@@ -59,11 +59,22 @@ public final class CalibrationReport {
     // ---- two runs -------------------------------------------------------------------------------
 
     public static String renderComparison(CalibrationRun baseline, CalibrationRun variant) {
+        return renderComparison(baseline, variant, null);
+    }
+
+    /**
+     * @param findings hand-written interpretation (Markdown) placed first, or null; the numbers below it
+     *                 are generated, the reading of them is not
+     */
+    public static String renderComparison(CalibrationRun baseline, CalibrationRun variant, String findings) {
         Summary a = Summary.of(baseline.outcomes());
         Summary b = Summary.of(variant.outcomes());
         StringBuilder md = new StringBuilder();
         md.append("# Grounding threshold calibration: ").append(baseline.label()).append(" vs ")
                 .append(variant.label()).append("\n\n");
+        if (findings != null && !findings.isBlank()) {
+            md.append(findings.strip()).append("\n\n");
+        }
         md.append("| | ").append(baseline.label()).append(" | ").append(variant.label()).append(" |\n| --- | --- | --- |\n");
         md.append("| What differs | ").append(baseline.note()).append(" | ").append(variant.note()).append(" |\n");
         md.append("| Generated | ").append(baseline.context().generatedAt()).append(" | ")

@@ -24,7 +24,7 @@ import java.util.stream.Stream;
  *
  * <p>Per document: hash the file; if the store already has exactly that hash, model and pipeline
  * version, skip (no parsing, no API call). The pipeline version covers what the file bytes do not:
- * the cleaning and chunking settings. Otherwise parse, clean, chunk and embed everything first, and only then replace
+ * the chunking settings. Otherwise parse, chunk and embed everything first, and only then replace
  * the stored chunks in one transaction, so an embedding failure leaves the old version intact.
  * Documents removed from the folder are pruned, unless the folder has no PDFs at all (more likely
  * a wrong path than an intentional wipe).
@@ -37,18 +37,15 @@ public class IngestionJob {
     private final AgentFwProperties app;
     private final IngestionProperties props;
     private final PdfLoader loader;
-    private final RunningHeaderStripper stripper;
     private final Chunker chunker;
     private final EmbeddingService embeddings;
     private final ChunkStore store;
 
-    public IngestionJob(AgentFwProperties app, IngestionProperties props, PdfLoader loader,
-                        RunningHeaderStripper stripper, Chunker chunker, EmbeddingService embeddings,
-                        ChunkStore store) {
+    public IngestionJob(AgentFwProperties app, IngestionProperties props, PdfLoader loader, Chunker chunker,
+                        EmbeddingService embeddings, ChunkStore store) {
         this.app = app;
         this.props = props;
         this.loader = loader;
-        this.stripper = stripper;
         this.chunker = chunker;
         this.embeddings = embeddings;
         this.store = store;
@@ -114,14 +111,6 @@ public class IngestionJob {
     /** @return false when the file has no extractable text (any stale chunks are removed). */
     private boolean ingest(String tenant, SourceDocument doc) {
         List<PdfPage> pages = loader.loadPages(doc);
-        if (props.stripRunningHeaders()) {
-            RunningHeaderStripper.Result cleaned = stripper.strip(pages);
-            if (cleaned.removedLines() > 0) {
-                log.info("{}: removed {} running header/footer lines ({} patterns)", doc.fileName(),
-                        cleaned.removedLines(), cleaned.patterns().size());
-            }
-            pages = cleaned.pages();
-        }
         List<TextChunk> chunks = chunker.chunk(pages);
         if (chunks.isEmpty()) {
             log.warn("{} has no extractable text ({} pages); is it a scan? Nothing stored", doc.fileName(), pages.size());

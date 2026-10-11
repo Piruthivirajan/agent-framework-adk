@@ -28,7 +28,8 @@ agentfw:
     num-candidates: 400          # MongoDB guidance: at least 20x the limit
     per-pipeline-limit: 20
     fused-limit: 20
-    rerank-depth: 20             # how many fused candidates the cross-encoder scores; 12 is measured against 20
+    rerank-depth: 12             # fused candidates the cross-encoder scores; 12 kept the answer page in the final 5 for
+                                 # all 32 in-corpus questions that 20 did (docs/CALIBRATION.md)
     final-top-n: 5
     vector-weight: 1.0
     text-weight: 1.0
@@ -42,4 +43,3 @@ agentfw:
     chunk-target-tokens: 650
     chunk-overlap-percent: 15
     chunk-min-tail-tokens: 100
-    strip-running-headers: true  # drop lines repeated at the top/bottom of most pages (see RunningHeaderStripper)
