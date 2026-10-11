@@ -11,6 +11,7 @@ import org.springframework.boot.ApplicationArguments;
 import org.springframework.boot.ApplicationRunner;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
+import tools.jackson.databind.DeserializationFeature;
 import tools.jackson.databind.SerializationFeature;
 import tools.jackson.databind.json.JsonMapper;
 
@@ -47,22 +48,55 @@ public class EndToEndRunner implements ApplicationRunner {
     private final String ids;
     private final String dir;
     private final int retries;
+    private final String output;
+    private final boolean renderOnly;
 
     public EndToEndRunner(ChatService chat, LlmProperties llm,
                           @Value("${agentfw.e2e.label:run}") String label,
                           @Value("${agentfw.e2e.ids:}") String ids,
                           @Value("${agentfw.e2e.dir:docs/e2e}") String dir,
-                          @Value("${agentfw.e2e.retries:2}") int retries) {
+                          @Value("${agentfw.e2e.retries:2}") int retries,
+                          @Value("${agentfw.e2e.output:}") String output,
+                          @Value("${agentfw.e2e.render-only:false}") boolean renderOnly) {
         this.chat = chat;
         this.llm = llm;
         this.label = label;
         this.ids = ids;
         this.dir = dir;
         this.retries = retries;
+        this.output = output;
+        this.renderOnly = renderOnly;
     }
 
     @Override
     public void run(ApplicationArguments args) throws IOException {
+        JsonMapper mapper = JsonMapper.builder().enable(SerializationFeature.INDENT_OUTPUT)
+                .disable(DeserializationFeature.FAIL_ON_NULL_FOR_PRIMITIVES).build();
+        Path file = Path.of(dir, label + ".json");
+        E2eRun run;
+        if (renderOnly) {
+            run = mapper.readValue(Files.readString(file, StandardCharsets.UTF_8), E2eRun.class);
+            log.info("Re-rendering saved end-to-end run '{}' from {}", label, file.toAbsolutePath());
+        } else {
+            run = execute();
+            Files.createDirectories(file.getParent());
+            Files.writeString(file, mapper.writeValueAsString(run), StandardCharsets.UTF_8);
+            log.info("Saved end-to-end run to {}", file.toAbsolutePath());
+        }
+        if (!output.isBlank()) {
+            Path findingsFile = Path.of(dir, "findings.md");
+            String findings = Files.isRegularFile(findingsFile)
+                    ? Files.readString(findingsFile, StandardCharsets.UTF_8) : null;
+            Path target = Path.of(output);
+            if (target.getParent() != null) {
+                Files.createDirectories(target.getParent());
+            }
+            Files.writeString(target, EndToEndReport.render(run, findings), StandardCharsets.UTF_8);
+            log.info("Report written to {}", target.toAbsolutePath());
+        }
+    }
+
+    private E2eRun execute() {
         Set<String> wanted = ids.isBlank() ? Set.of()
                 : Arrays.stream(ids.split(",")).map(String::strip).collect(Collectors.toSet());
         List<CalibrationQuestion> questions = CalibrationQuestions.load().stream()
@@ -78,14 +112,8 @@ public class EndToEndRunner implements ApplicationRunner {
                     o.answered() ? "answered " + o.citedPages() : "not answered (" + o.notFoundReason() + ")",
                     q.question());
         }
-
-        E2eRun run = new E2eRun(label, llm.model(), llm.coordinatorThinkingBudget(), llm.agentThinkingBudget(),
+        return new E2eRun(label, llm.model(), llm.coordinatorThinkingBudget(), llm.agentThinkingBudget(),
                 Instant.now().toString(), outcomes);
-        JsonMapper mapper = JsonMapper.builder().enable(SerializationFeature.INDENT_OUTPUT).build();
-        Path file = Path.of(dir, label + ".json");
-        Files.createDirectories(file.getParent());
-        Files.writeString(file, mapper.writeValueAsString(run), StandardCharsets.UTF_8);
-        log.info("Saved end-to-end run to {}", file.toAbsolutePath());
     }
 
     private E2eOutcome ask(CalibrationQuestion q) {
