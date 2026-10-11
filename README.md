@@ -26,6 +26,17 @@ only store. One chat page, one coordinator, and agents that are plugins:
 
 Prerequisites: **Java 21**, **Docker**, a **Gemini API key** (Google AI Studio).
 
+**Windows, one click:** put the key in `.env` (`GOOGLE_API_KEY=...`), then double-click
+
+| file | what it does |
+| --- | --- |
+| `start-demo.bat` | starts MongoDB, downloads the corpus if missing, starts the demo MCP server and the application, opens the browser |
+| `check-demo.bat` | live checks against the running app (routing and MCP; about 25 model calls) |
+| `run-tests.bat` | the unit tests (`./mvnw verify`; no key, no network) |
+| `stop-demo.bat` | stops the app, the demo MCP server and MongoDB (data is kept) |
+
+The manual steps are below (and are what the `.bat` files do).
+
 ```bash
 git clone <repository URL> agent-framework && cd agent-framework
 
