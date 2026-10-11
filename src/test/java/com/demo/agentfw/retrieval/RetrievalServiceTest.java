@@ -74,7 +74,7 @@ class RetrievalServiceTest {
 
         RetrievalResult r = svc.retrieve("what is topic seven?");
 
-        assertThat(r.decision()).isEqualTo(GroundingDecision.OK);
+        assertThat(r.decision()).isEqualTo(GroundingDecision.PASSED_FLOOR);
         assertThat(r.chunks()).extracting(RetrievedChunk::page).containsExactly(7, 3, 12, 1, 2);
         assertThat(r.chunks().get(0).rerankScore()).isEqualTo(9.0);
         assertThat(calls).containsExactly(20);
@@ -155,7 +155,7 @@ class RetrievalServiceTest {
 
         assertThat(t.stageMillis()).containsKeys("embed_query", "search_and_fusion", "rerank");
         assertThat(t.totalMillis()).isGreaterThanOrEqualTo(0);
-        assertThat(t.grounding().decision()).isEqualTo(GroundingDecision.OK);
+        assertThat(t.grounding().decision()).isEqualTo(GroundingDecision.PASSED_FLOOR);
         assertThat(t.grounding().margin()).isEqualTo(2.0);
     }
 

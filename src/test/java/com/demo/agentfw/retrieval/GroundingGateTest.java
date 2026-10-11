@@ -8,8 +8,8 @@ class GroundingGateTest {
 
     @Test
     void scoreAtOrAboveThresholdIsGrounded() {
-        assertThat(GroundingGate.decide(3.2, 2.0)).isEqualTo(GroundingDecision.OK);
-        assertThat(GroundingGate.decide(2.0, 2.0)).isEqualTo(GroundingDecision.OK);   // boundary is inclusive
+        assertThat(GroundingGate.decide(3.2, 2.0)).isEqualTo(GroundingDecision.PASSED_FLOOR);
+        assertThat(GroundingGate.decide(2.0, 2.0)).isEqualTo(GroundingDecision.PASSED_FLOOR);   // boundary is inclusive
     }
 
     @Test

@@ -55,7 +55,7 @@ Decisions: `gemini-3.8-flash` for both agents, configurable by name, low thinkin
 
 - [x] 0. API spike (scripted model, one live call)
 - [x] 1. Plugin framework: `AgentPlugin`, `AgentRegistry`, `CoordinatorFactory`, `ModelFactory`, third-plugin test
-- [ ] 2. Retrieval tool, `RetrievalLedger`, `RagAgentPlugin` (instruction and JSON contract); rename `GroundingDecision.OK`
+- [x] 2. Retrieval tool, `RetrievalLedger`, `RagAgentPlugin` (instruction and JSON contract); rename `GroundingDecision.OK`
 - [ ] 3. `GroundingVerifier` (quote and numeric support) and renderer
 - [ ] 4. `ChatService` with scripted-model scenario A and B tests
 - [ ] 5. Live scenarios A and B; thinking-budget measurement
@@ -81,6 +81,14 @@ Retrieval gate (done, Day 3): a low **floor** at -6.5 removes only clear junk; 3
 ## Log
 
 <!-- Newest first. One entry per task: date, what was built, what was verified. -->
+
+### 2026-10-11: Day 4 step 2, search tool, ledger, RAG agent
+- `GroundingDecision.OK` renamed **`PASSED_FLOOR`** (the enum documents that it is not "grounded").
+- `SearchDocumentsTool.searchDocuments(query, toolContext)` runs the full retrieval funnel. What the **model** receives: `{status: OK, chunks: [{ref, file, page, text}]}` or `{status: NO_RELEVANT_CONTEXT}`; no scores, ranks or trace (tested to contain none). The request id is read from the session state copied into the nested agent (spike finding), with the nested session id as a fallback.
+- `RetrievalLedger` (bounded to 256 requests): every chunk handed to the model gets a ref (`r1c2` = first retrieval of the request, second chunk), kept with file, page, text and rerank score, plus the retrieval's trace. Requests cannot see each other's chunks; rewritten queries are all recorded, so every citation stays verifiable. File and page shown to the user will come from the ledger, never from the model.
+- `RagAgentPlugin` (`rag_agent`, `finalAnswer=true`): instruction fixes the procedure (at most 3 searches, only chunk text, numbers from the chunk) and the **JSON contract**: `{"status":"ANSWERED","claims":[{"text","ref","quote"}]}` or `{"status":"NOT_FOUND"}`; quote 30 to 250 characters copied verbatim; any number in a claim's text must also appear in its quote; at most 6 claims.
+- Tests (scripted model): the tool declaration offers only `query` (the context is injected); the model's tool result carries refs and text; below the floor it hears only `NO_RELEVANT_CONTEXT`; the instruction states the contract; ledger numbering, isolation, bounds; Spring wiring (`rag_agent` is the only plugin, the model factory is the scripted fake).
+- Verified: BUILD SUCCESS, 144 tests.
 
 ### 2026-10-11: Day 4 step 1, plugin framework
 - `AgentPlugin` (`name`, `description`, `build(AgentContext)`, `finalAnswer()` default true), `AgentRegistry` (validates names and descriptions, rejects duplicates, sorts for a deterministic prompt, wraps each plugin's agent in `AgentTool.create(agent, finalAnswer)`), `CoordinatorFactory` (router instruction generated from the plugins' descriptions; runner built on first use and cached, `invalidate()` for runtime tool changes; `maxLlmCalls` from config), `ModelFactory` seam with `GeminiModelFactory` (key checked lazily, so the application and the tests start without one).
