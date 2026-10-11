@@ -191,7 +191,8 @@
     box.appendChild(el('p', { class: 'note', text: 'Connecting…' }));
     $('test').disabled = true;
     api('POST', '/api/mcp/servers/test', formBody()).then(function (r) {
-      if (r.ok) showResult(box, true, 'Connected. ' + r.tools.length + ' tool' + (r.tools.length === 1 ? '' : 's') + ' available:', r.tools);
+      if (r.ok && r.tools.length === 0) showResult(box, false, 'The server answered, but it offers no tools, so there is nothing for the assistant to use.');
+      else if (r.ok) showResult(box, true, 'Connected. ' + r.tools.length + ' tool' + (r.tools.length === 1 ? '' : 's') + ' available:', r.tools);
       else showResult(box, false, r.error.message);
     }).catch(function (e) { showResult(box, false, e.message); })
       .then(function () { $('test').disabled = false; });
@@ -204,7 +205,10 @@
     box.appendChild(el('p', { class: 'note', text: 'Saving and loading the tools…' }));
     $('save').disabled = true;
     api('POST', '/api/mcp/servers', formBody()).then(function (s) {
-      if (s.status === 'CONNECTED') {
+      if (s.status === 'CONNECTED' && s.tools.length === 0) {
+        showResult(box, false, 'Saved, but the server offers no tools, so there is nothing for the assistant to use.');
+        load();
+      } else if (s.status === 'CONNECTED') {
         showResult(box, true, 'Saved. ' + s.tools.length + ' tool' + (s.tools.length === 1 ? '' : 's') + ' are now available to the assistant.', s.tools);
         $('form').reset();
         $('headers').textContent = '';

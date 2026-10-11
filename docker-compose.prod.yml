@@ -67,7 +67,7 @@ services:
   # The server is reachable inside the compose network only (nothing is published).
   demo-mcp:
     profiles: ["demo"]
-    image: eclipse-temurin:21-jre
+    image: eclipse-temurin:21-jdk      # the JDK, not the JRE: `java File.java` needs the compiler module
     restart: unless-stopped
     command:
       - java

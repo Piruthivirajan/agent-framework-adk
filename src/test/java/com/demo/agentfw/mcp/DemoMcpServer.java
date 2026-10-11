@@ -36,6 +36,8 @@ import java.util.concurrent.TimeUnit;
 public final class DemoMcpServer {
 
     private static final String PROTOCOL = "2025-03-26";
+    /** Logs one line per JSON-RPC message (set DEMO_MCP_QUIET=1 to silence). */
+    private static final boolean VERBOSE = System.getenv("DEMO_MCP_QUIET") == null;
 
     private final String token;
     private final HttpServer http;
@@ -200,6 +202,10 @@ public final class DemoMcpServer {
         }
         Object id = request.get("id");
         String method = String.valueOf(request.get("method"));
+        if (VERBOSE) {
+            System.out.println("rpc " + method + (id == null ? " (notification)" : " id=" + id)
+                    + (request.get("params") instanceof Map<?, ?> p && p.get("name") != null ? " tool=" + p.get("name") : ""));
+        }
         Map<String, Object> params = request.get("params") instanceof Map<?, ?> m ? (Map<String, Object>) m : Map.of();
         if (id == null) {
             return null;                                          // notifications/initialized and friends

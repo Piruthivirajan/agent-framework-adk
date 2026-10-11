@@ -19,9 +19,14 @@ COPY mvnw pom.xml ./
 RUN --mount=type=cache,target=/root/.m2 ./mvnw -B -q dependency:resolve dependency:resolve-plugins
 
 COPY src src
-# tests run in CI and on the developer machine (./mvnw verify); the image build only packages
-RUN --mount=type=cache,target=/root/.m2 ./mvnw -B -q -DskipTests package \
- && cp target/agent-framework-*.jar /app.jar
+# tests run on the developer machine (./mvnw verify); the image build only packages
+RUN --mount=type=cache,target=/root/.m2 ./mvnw -B -q -Dmaven.test.skip=true package
+
+# Extract the executable jar into a plain classpath layout (the application jar plus lib/*.jar). This is
+# Spring Boot's recommended container layout, and it is required here: under Boot's nested-jar loader
+# (`java -jar` on the fat jar) the MCP SDK silently returns zero tools (found by the compose smoke test),
+# while the same jars on a normal classpath work.
+RUN java -Djarmode=tools -jar target/agent-framework-*.jar extract --destination /extracted
 
 # ---- 2. runtime ----------------------------------------------------------------------------------------
 FROM eclipse-temurin:21-jre AS runtime
@@ -38,7 +43,8 @@ WORKDIR /app
 COPY scripts/fetch-model.sh /tmp/fetch-model.sh
 RUN MODEL_DIR=/app/models/ms-marco-MiniLM-L-6-v2 bash /tmp/fetch-model.sh && rm /tmp/fetch-model.sh
 
-COPY --from=build /app.jar /app/app.jar
+COPY --from=build /extracted/lib /app/lib
+COPY --from=build /extracted/agent-framework-*.jar /app/app.jar
 
 # Runs as a numeric non-root user (compose sets it to the owner of the mounted corpus folder).
 ENV JAVA_TOOL_OPTIONS="-XX:MaxRAMPercentage=40 -XX:+ExitOnOutOfMemoryError"
