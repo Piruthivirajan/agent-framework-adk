@@ -151,7 +151,7 @@ public class ChatService {
             List<Event> events = runner.runAsync(USER_ID, sessionId, Content.fromParts(Part.fromText(effective)),
                             coordinators.runConfig(), state)
                     .toList().blockingGet();
-            ChatResult result = decide(events, requestId, start, attachment);
+            ChatResult result = decide(events, requestId, start, attachment, text);
             history.add(sessionId, text, result.answer());
             result = result.withStages(progress.snapshot(requestId));
             return effective.equals(text) ? result : result.withRewrittenQuestion(effective);
@@ -167,11 +167,17 @@ public class ChatService {
         }
     }
 
-    private ChatResult decide(List<Event> events, String requestId, long start, boolean attachment) {
+    private ChatResult decide(List<Event> events, String requestId, long start, boolean attachment, String text) {
         List<String> toolCalls = new ArrayList<>();
+        java.util.concurrent.atomic.AtomicReference<String> routedRequest = new java.util.concurrent.atomic.AtomicReference<>();
         Optional<String> ragOutput = Optional.empty();
         for (Event event : events) {
-            event.functionCalls().forEach(fc -> fc.name().ifPresent(toolCalls::add));
+            event.functionCalls().forEach(fc -> {
+                fc.name().ifPresent(toolCalls::add);
+                if (routedRequest.get() == null) {
+                    fc.args().map(a -> a.get("request")).map(String::valueOf).ifPresent(routedRequest::set);
+                }
+            });
             for (FunctionResponse response : event.functionResponses()) {
                 if (RagAgentPlugin.NAME.equals(response.name().orElse(""))) {
                     ragOutput = Optional.of(resultText(response));
@@ -215,6 +221,10 @@ public class ChatService {
             result = new ChatResult(GroundingVerifier.NOT_FOUND, toolCalls.get(0), false, List.of(), traces,
                     new ChatResult.Verification(List.of("the answer of tool '" + toolCalls.get(0)
                             + "' has no verification path yet"), false), toolCalls, null, requestId, millisSince(start));
+        }
+        String routed = routedRequest.get();
+        if (!attachment && routed != null && !routed.isBlank() && !routed.strip().equals(text.strip())) {
+            result = result.withRewrittenQuestion(routed.strip());      // the coordinator restated a follow-up
         }
         log.info("chat request={} route={} grounded={} problems={} toolCalls={} retrievals={} ms={}", requestId,
                 result.route(), result.grounded(), result.verification().problems().size(), toolCalls, traces.size(),

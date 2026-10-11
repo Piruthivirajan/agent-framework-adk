@@ -51,7 +51,8 @@ class ChatServiceTest {
         final AtomicReference<String> ragFinal = new AtomicReference<>("{\"status\":\"NOT_FOUND\"}");
         final AtomicReference<String> coordinatorProse = new AtomicReference<>("coordinator prose");
         final AtomicReference<String> coordinatorTool = new AtomicReference<>("rag_agent");
-        final AtomicReference<String> coordinatorRequest = new AtomicReference<>("the user's question");
+        /** What the scripted coordinator passes to the agent; null means "the user's message unchanged". */
+        final AtomicReference<String> coordinatorRequest = new AtomicReference<>();
         final InMemoryUploadStore uploadStore = new InMemoryUploadStore();
         final UploadService uploads = new UploadService(EXTRACTOR, uploadStore, FileProperties.defaults());
         final AtomicReference<TextGenerator> fileModel = new AtomicReference<>(
@@ -109,11 +110,18 @@ class ChatServiceTest {
             llm.script(this::respond);
         }
 
+        private static String lastUserText(LlmRequest req) {
+            return req.contents().stream().filter(c -> "user".equals(c.role().orElse("")))
+                    .map(c -> c.parts().orElse(List.of()).stream().map(p -> p.text().orElse("")).findFirst().orElse(""))
+                    .filter(t -> !t.isEmpty()).reduce((x, y) -> y).orElse("");
+        }
+
         Content respond(LlmRequest req) {
             if (req.tools().containsKey("rag_agent")) {                       // the coordinator
                 return ScriptedLlm.hasToolResult(req)
                         ? ScriptedLlm.text(coordinatorProse.get())
-                        : ScriptedLlm.call(coordinatorTool.get(), Map.of("request", coordinatorRequest.get()));
+                        : ScriptedLlm.call(coordinatorTool.get(), Map.of("request",
+                                coordinatorRequest.get() != null ? coordinatorRequest.get() : lastUserText(req)));
             }
             if (req.tools().containsKey("searchDocuments")) {                 // the RAG agent
                 return ScriptedLlm.hasToolResult(req)

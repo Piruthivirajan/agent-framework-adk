@@ -84,9 +84,16 @@ public class CoordinatorFactory {
 
     static String instruction(List<AgentPlugin> plugins) {
         StringBuilder sb = new StringBuilder();
-        sb.append("You are a router. For every user message, call exactly one of the agents below and pass the ")
-                .append("user's message unchanged as the request. Do not answer yourself and do not use your own ")
-                .append("knowledge; if no agent seems to fit, call the closest one anyway.\n\nAgents:\n");
+        sb.append("You are a router. For every user message, call exactly one of the agents below. Do not ")
+                .append("answer yourself and do not use your own knowledge; if no agent seems to fit, call the ")
+                .append("closest one anyway.\n\n")
+                .append("The request you pass must make sense on its own, because the agent cannot see this ")
+                .append("conversation. If the user's latest message points back to the conversation (it, that, ")
+                .append("they, \"shorter\", \"and the cost one?\"), restate it as one complete message that names ")
+                .append("what it points to, using only the conversation. If the message already names its own ")
+                .append("subject, pass it exactly unchanged, even if the conversation was about something else; ")
+                .append("never add the conversation's topic or file names to it, and never add facts.\n\n")
+                .append("Agents:\n");
         for (AgentPlugin p : plugins) {
             sb.append("- ").append(p.name()).append(": ").append(p.description()).append('\n');
         }

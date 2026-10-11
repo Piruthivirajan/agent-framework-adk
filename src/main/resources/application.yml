@@ -49,7 +49,7 @@ agentfw:
     max-retries: 2
     max-segments: 250            # covers max-chars up to the 3,000,000 ceiling at 15,000 characters a part
   chat:
-    rewrite-follow-ups: true     # one short model call on every turn after the first (docs/PROGRESS.md, Day 5 step 5)
+    rewrite-follow-ups: false    # a separate rewrite call (+2.5 to 4.5 s per turn); the coordinator now restates follow-ups itself
     history-turns: 4
     max-sessions: 500
   rag:

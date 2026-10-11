@@ -49,6 +49,12 @@ Decisions: reranker `ms-marco-MiniLM-L6-v2` fp32 as baseline, int8 chosen only i
 
 - **Hosting decision needs a measurement:** rerank latency on a small cloud CPU will be several times the laptop number (about 1.8 s for 20 chunks, single predictor, on an i7-10850H 6C/12T). Measure rerank latency on the target host before choosing the hosting tier; if too slow, options are the int8 model, a smaller rerank depth, or a hosted reranker behind the same `Reranker` interface.
 
+**Day 7 plan (decided by the user, "speed mode", two days to submission):**
+- Deployment: one always-on VM with Docker Compose: the app, `mongodb-atlas-local` 8.3, the rerank model files baked into the image (no download on first start). Check rerank latency on that VM (see the hosting note above) and the Gemini quota.
+- One final 48-question end-to-end run, only on the last day, for the README numbers. No other full runs before it.
+- README: how to run locally, architecture, design decisions, evaluation results, limitations, and production next steps: MCP configuration persistence with encryption, asynchronous jobs for large summaries, larger summaries (parallelism is bounded at 4 by something outside our code).
+- Also from Day 5: the demo password and the MCP demo server instructions belong in the README; SSE through a reverse proxy needs buffering switched off.
+
 ## Day 4: agents (approved plan, each step built, tested and committed)
 
 Decisions: `gemini-3.8-flash` for both agents, configurable by name, low thinking budget on the coordinator (latency measured); numeric-support rule with number-format normalisation; any bad quote replaces the whole answer, no retry for now (measure the false "not found" rate first; if high, test ONE retry that sends the verifier's error back to the RAG agent); the final answer is the verified `rag_agent` result and the coordinator's prose is ignored; when no tool is called the reply is the fixed sentence "I can answer questions about the reference documents, summarize files, or use connected tools. I couldn't find that in the reference documents."; quotes go in a separate `sources` list of the API response, not inline in the answer text.
@@ -90,6 +96,15 @@ Decisions (user): file agent shape decided by the step 0 spike; **two paths** to
 - [x] 8. UI: chat, attach/paste, sources, trace panel, progress, KB upload; verified in the browser on A, B, C
 - [x] 9. Scenario C measurement (small TXT, 20-page PDF, the 300+ page PDF), final limits from the numbers
 
+## Day 6: MCP, login (speed mode: built in this order, each step committed)
+
+- [x] 0. Follow-up rewrite folded into the coordinator's own call (no separate rewrite call)
+- [ ] 1. MCP settings page and registry: Streamable HTTP and legacy SSE, custom auth headers, test connection with tool list, runtime loading without restart, in-memory config, masked, never logged
+- [ ] 2. MCP answer path: `mcp_agent`, "RAG not found then MCP" in code, which server and tool answered, raw tool result in the trace
+- [ ] 3. Clear messages: wrong URL, wrong token, server down, tool error, Gemini timeout and rate limit
+- [ ] 4. Demo MCP server (`src/test/java/com/demo/agentfw/mcp/DemoMcpServer.java`) and instructions
+- [ ] 5. Demo login (one password from the environment) protecting the whole app
+
 ## Watch list
 
 - The skeleton code in PLAN.md (`StreamableHttpServerParameters`, `AgentTool`, `FunctionTool.create`, `McpToolset`) was written against an older ADK. Before using any of them (Day 4 and Day 6), check the class and method names against the ADK 1.11.0 javadoc or sources.
@@ -97,6 +112,11 @@ Decisions (user): file agent shape decided by the step 0 spike; **two paths** to
 ## Log
 
 <!-- Newest first. One entry per task: date, what was built, what was verified. -->
+
+### 2026-10-11: Day 6 step 0, follow-up rewrite folded into the coordinator (kept)
+- **What:** the coordinator already sees the chat history and writes the request text for the agent tool, so its instruction now says: if the latest message points back to the conversation, restate it as one complete message using only the conversation; if it already names its own subject, pass it exactly unchanged and never add the conversation's topic or file names. The separate rewrite call is off by default (`agentfw.chat.rewrite-follow-ups: false`; the class stays for anyone who wants it). `ChatResult.rewrittenQuestion` is now read from the coordinator's own function-call argument.
+- **Check (your criterion): `scripts/live-routing-check.py` 10 of 10** with the real model: 3 reference questions to RAG, 3 file requests to the file agent, "Who can use it?" restated as "Who can use the AWS Well-Architected Tool?", "And what does the cost one cover?" restated, the self-contained Security question after a file summary left unchanged and routed to RAG, "Make it shorter" to the file agent. This removes the 2.5 to 4.5 s per follow-up turn that the separate call cost. One run, 10 cases.
+- Verified: BUILD SUCCESS, 292 tests.
 
 ### 2026-10-11: Day 5 step 9, scenario C measured on real files, limits set from the numbers
 Live, through the streaming endpoint, `gemini-3.8-flash`, thinking budget 0, single runs (`scripts/live-file-summary-check.py`). "Parts" are map calls; each file is asked for "a summary in about 150 words".
