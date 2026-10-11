@@ -58,6 +58,14 @@
 			<version>${tika.version}</version>
 			<type>pom</type> <!-- pom-only aggregator since Tika 4; has no jar -->
 		</dependency>
+		<dependency>
+			<!-- Tika 4.1.0 is built for commons-compress 1.28 (ArchiveException became an IOException).
+			     DJL brings 1.27.1 nearer to the root, which wins; with it Tika's type detection throws
+			     "No Archiver found for the stream signature" on every non-archive file. Pinned here. -->
+			<groupId>org.apache.commons</groupId>
+			<artifactId>commons-compress</artifactId>
+			<version>1.28.0</version>
+		</dependency>
 
 		<!-- Cross-encoder re-ranker -->
 		<dependency>

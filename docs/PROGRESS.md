@@ -81,7 +81,7 @@ Decisions (user): file agent shape decided by the step 0 spike; **two paths** to
 
 - [x] 0. ADK spike: file agent shape (LlmAgent + tool vs custom BaseAgent), a tool that calls the model, cost of the extra call
 - [x] 1. Verifier: one retry for malformed JSON, RAG prompt line on numbers, measured on the same 48 questions
-- [ ] 2. Uploads: Tika parsing, `uploads` collection (TTL), limits, error messages
+- [x] 2. Uploads: Tika parsing, `uploads` collection (TTL), limits, error messages
 - [ ] 3. `MapReduceSummarizer` (single pass, map-reduce, hierarchical reduce, failure behaviour)
 - [ ] 4. `FileAgentPlugin`, fast path by code, coordinator tool with session files, summaries labelled
 - [ ] 5. Follow-up rewriting from chat history (3 follow-up pairs in tests)
@@ -97,6 +97,14 @@ Decisions (user): file agent shape decided by the step 0 spike; **two paths** to
 ## Log
 
 <!-- Newest first. One entry per task: date, what was built, what was verified. -->
+
+### 2026-10-11: Day 5 step 2, uploads (`com.demo.agentfw.files`)
+- **`TextExtractor`** (Tika 4.1.0): type detected from the bytes, not the name; allow-list PDF, DOCX, plain text (anything else is `UNSUPPORTED_TYPE` and the message names the type); `BodyContentHandler(maxChars)` stops a huge file early (`TOO_MUCH_TEXT`, message states the limit); a corrupt file is `UNREADABLE`; page count from the metadata when the format has one.
+- **`UploadService`**: limits (`agentfw.files.*`: 20 MB, 1,000,000 characters as the starting value, 24 h TTL, 10 files per session), reasons `EMPTY`, `TOO_LARGE` (message with both sizes in readable units), `NO_TEXT` ("scanned or image-only documents are not supported, there is no OCR"), `TOO_MANY_FILES`. Pasted text goes through the same path as `text/plain`. File names are sanitised for display (no path, no control characters, 200 characters). A file can only be read from the session that uploaded it.
+- **`MongoUploadStore`**: collection `uploads` (extracted text only, the bytes are not kept), TTL index `uploads_ttl` on `createdAt` that is replaced when the configured lifetime changes, index on `(sessionId, createdAt)`, schema created on the first save so the app starts without a database. `UploadStore` port with an in-memory implementation for tests.
+- **Dependency finding:** with Tika 4.1.0 every type detection threw `ArchiveException: No Archiver found for the stream signature`. Cause: DJL brings commons-compress 1.27.1 closer to the root than Tika's 1.28.0 (Maven nearest-wins), and Tika 4 expects the 1.28 exception hierarchy. Pinned `commons-compress` 1.28.0 in the pom with a comment; this pulled one transitive jar (commons-io 2.20.0, 564 kB, Maven Central).
+- Test DOCX is built by hand (a ZIP of three XML parts): POI's schema jar (`poi-ooxml-lite`) is not on the classpath, and Tika reads DOCX without POI's object model.
+- Verified: BUILD SUCCESS, 220 tests (2 against MongoDB).
 
 ### 2026-10-11: Day 5 step 1, one retry for malformed JSON, number line in the RAG prompt
 - **What:** when the RAG agent's output has braces but is not parseable JSON (the slip seen live: `"ref":"r1c3,quote":"..."`), `ChatService` makes **one** model call (`MalformedAnswerRepair`) that shows the model its own output and asks for the same object with only the syntax fixed; the repaired text then goes through the unchanged `GroundingVerifier`, so a repair cannot add an unverified claim (tested: a repair that changes a quote is rejected). Not retried: prose without braces, an unknown ref, a quote not in the chunk, a number not in its quote. A failed or still-malformed repair means the not-found sentence. `ChatResult.Verification.repaired` records it.
