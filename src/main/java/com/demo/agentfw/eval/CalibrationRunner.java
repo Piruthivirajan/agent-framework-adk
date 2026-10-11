@@ -11,6 +11,8 @@ import org.springframework.boot.ApplicationArguments;
 import org.springframework.boot.ApplicationRunner;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
+import tools.jackson.databind.SerializationFeature;
+import tools.jackson.databind.json.JsonMapper;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -26,8 +28,11 @@ import java.util.List;
  * active with {@code agentfw.calibration.run=true}, so it never runs by accident (it calls the
  * embedding API once per question).
  *
+ * <p>Each run is saved as {@code <dir>/<label>.json}. With {@code compare-with=<other label>} the
+ * report is the side-by-side comparison of that saved run and this one.
+ *
  * <pre>
- * ./mvnw spring-boot:run "-Dspring-boot.run.arguments=--agentfw.calibration.run=true --spring.main.web-application-type=none"
+ * ./mvnw spring-boot:run "-Dspring-boot.run.arguments=--agentfw.calibration.run=true --agentfw.calibration.label=baseline --spring.main.web-application-type=none"
  * </pre>
  */
 @Component
@@ -38,12 +43,24 @@ public class CalibrationRunner implements ApplicationRunner {
 
     private final RetrievalService retrieval;
     private final RetrievalProperties defaults;
+    private final String label;
+    private final String note;
+    private final String compareWith;
+    private final String dir;
     private final String output;
 
     public CalibrationRunner(RetrievalService retrieval, RetrievalProperties defaults,
+                             @Value("${agentfw.calibration.label:run}") String label,
+                             @Value("${agentfw.calibration.note:}") String note,
+                             @Value("${agentfw.calibration.compare-with:}") String compareWith,
+                             @Value("${agentfw.calibration.dir:docs/calibration}") String dir,
                              @Value("${agentfw.calibration.output:docs/CALIBRATION.md}") String output) {
         this.retrieval = retrieval;
         this.defaults = defaults;
+        this.label = label;
+        this.note = note;
+        this.compareWith = compareWith;
+        this.dir = dir;
         this.output = output;
     }
 
@@ -52,7 +69,7 @@ public class CalibrationRunner implements ApplicationRunner {
         // score all fused candidates once, with no threshold: depth 12 is derived from the same scores
         RetrievalProperties settings = defaults.withRerankDepth(defaults.fusedLimit()).withMinRerankScore(null);
         List<CalibrationQuestion> questions = CalibrationQuestions.load();
-        log.info("Calibrating on {} questions", questions.size());
+        log.info("Calibrating '{}' on {} questions", label, questions.size());
 
         List<QuestionOutcome> outcomes = new ArrayList<>();
         String embeddingModel = "";
@@ -64,9 +81,28 @@ public class CalibrationRunner implements ApplicationRunner {
             rerankModel = r.trace().config().rerankModel();
         }
 
-        String markdown = CalibrationReport.render(outcomes, new CalibrationReport.Context(
-                Instant.now().toString(), embeddingModel, rerankModel, settings.fusion().name(),
-                settings.fusedLimit(), settings.finalTopN()));
+        CalibrationReport.Context context = new CalibrationReport.Context(Instant.now().toString(), embeddingModel,
+                rerankModel, settings.fusion().name(), settings.fusedLimit(), settings.finalTopN());
+        CalibrationRun current = new CalibrationRun(label, note, context, outcomes);
+
+        JsonMapper mapper = JsonMapper.builder().enable(SerializationFeature.INDENT_OUTPUT).build();
+        Path saved = Path.of(dir, label + ".json");
+        Files.createDirectories(saved.getParent());
+        Files.writeString(saved, mapper.writeValueAsString(current), StandardCharsets.UTF_8);
+        log.info("Saved run to {}", saved.toAbsolutePath());
+
+        String markdown;
+        Path other = compareWith.isBlank() ? null : Path.of(dir, compareWith + ".json");
+        if (other != null && Files.isRegularFile(other)) {
+            CalibrationRun baseline = mapper.readValue(Files.readString(other, StandardCharsets.UTF_8),
+                    CalibrationRun.class);
+            markdown = CalibrationReport.renderComparison(baseline, current);
+        } else {
+            if (other != null) {
+                log.warn("Run '{}' to compare with was not found at {}; writing a single-run report", compareWith, other);
+            }
+            markdown = CalibrationReport.render(outcomes, context);
+        }
         Path target = Path.of(output);
         if (target.getParent() != null) {
             Files.createDirectories(target.getParent());
@@ -95,7 +131,7 @@ public class CalibrationRunner implements ApplicationRunner {
         }
         return new QuestionOutcome(q.id(), q.type(), q.split(), q.question(), best.rerankScore(),
                 shortName(best.file()) + " p" + best.page(), top12, expectedRank, in5d20, in5d12,
-                trace.rerank().truncatedPairs(), trace.rerank().millis(), trace.totalMillis());
+                trace.rerank().truncatedPairs(), trace.rerank().millis(), trace.totalMillis(), q.paraphrase());
     }
 
     private static String shortName(String file) {

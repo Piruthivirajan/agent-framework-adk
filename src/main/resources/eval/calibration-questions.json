@@ -1,5 +1,5 @@
 {
-  "description": "Calibration questions for the grounding gate (Day 3) and seed of the Day 7 golden set. In-corpus questions carry a verbatim evidence phrase; 'expected' lists every page of the whole corpus where that phrase appears (table-of-contents pages excluded), because the same passage often repeats across the framework and the pillars. 'intendedFile' is the document the question was written from. Out-of-corpus questions list terms verified absent from the corpus. Split: every 4th question of each type is held out and not used to choose the threshold.",
+  "description": "Calibration questions for the grounding gate (Day 3) and seed of the Day 7 golden set, over the 10-document corpus. In-corpus questions carry a verbatim evidence phrase; 'expected' lists every page of the whole corpus where that phrase appears (table-of-contents pages excluded), because the same passage often repeats across the framework and the pillars. 'intendedFile' is the document the question was written from. Tag 'paraphrase' marks questions with little keyword overlap with their page. Types: IN_CORPUS; OUT_FAR (unrelated topic); OUT_NEAR (same domain, not AWS-specific content); OUT_AWS (an AWS question whose specific answer is not in these PDFs). Out-of-corpus questions list terms verified absent from the corpus. Split: every 4th question of each type is held out and not used to choose the threshold.",
   "corpusSha256Manifest": "scripts/corpus-manifest.tsv",
   "questions": [
     {
@@ -78,6 +78,12 @@
       "type": "IN_CORPUS",
       "question": "What does recovery time objective (RTO) mean?",
       "expected": [
+        {
+          "file": "disaster-recovery-workloads-on-aws.pdf",
+          "pages": [
+            13
+          ]
+        },
         {
           "file": "microservices-on-aws.pdf",
           "pages": [
@@ -570,6 +576,193 @@
         "tcp_rmem"
       ],
       "split": "calibration"
+    },
+    {
+      "id": "in-25",
+      "type": "IN_CORPUS",
+      "question": "What does it mean to adopt a consumption model?",
+      "expected": [
+        {
+          "file": "wellarchitected-cost-optimization-pillar.pdf",
+          "pages": [
+            8
+          ]
+        }
+      ],
+      "evidence": "Pay only for the computing resources you consume",
+      "intendedFile": "wellarchitected-cost-optimization-pillar.pdf",
+      "split": "calibration"
+    },
+    {
+      "id": "in-26",
+      "type": "IN_CORPUS",
+      "question": "How does the cost optimization pillar suggest reducing cloud waste?",
+      "expected": [
+        {
+          "file": "wellarchitected-cost-optimization-pillar.pdf",
+          "pages": [
+            28
+          ]
+        },
+        {
+          "file": "wellarchitected-framework.pdf",
+          "pages": [
+            823
+          ]
+        }
+      ],
+      "evidence": "Identify and recoup spend associated with cloud waste",
+      "intendedFile": "wellarchitected-cost-optimization-pillar.pdf",
+      "split": "calibration"
+    },
+    {
+      "id": "in-27",
+      "type": "IN_CORPUS",
+      "question": "Why does the choice of AWS Region matter for the carbon footprint of a workload?",
+      "expected": [
+        {
+          "file": "wellarchitected-framework.pdf",
+          "pages": [
+            935
+          ]
+        },
+        {
+          "file": "wellarchitected-sustainability-pillar.pdf",
+          "pages": [
+            23
+          ]
+        }
+      ],
+      "evidence": "Regions with low published carbon intensity can help to lower the carbon footprint",
+      "intendedFile": "wellarchitected-sustainability-pillar.pdf",
+      "split": "calibration"
+    },
+    {
+      "id": "in-28",
+      "type": "IN_CORPUS",
+      "question": "What is the shared responsibility model for sustainability?",
+      "expected": [
+        {
+          "file": "wellarchitected-sustainability-pillar.pdf",
+          "pages": [
+            7
+          ]
+        }
+      ],
+      "evidence": "shared responsibility model for environmental sustainability",
+      "intendedFile": "wellarchitected-sustainability-pillar.pdf",
+      "split": "holdout"
+    },
+    {
+      "id": "in-29",
+      "type": "IN_CORPUS",
+      "question": "What are the four disaster recovery strategies described for workloads on AWS?",
+      "expected": [
+        {
+          "file": "disaster-recovery-workloads-on-aws.pdf",
+          "pages": [
+            13
+          ]
+        }
+      ],
+      "evidence": "backup and restore, pilot light, warm standby, and multi-site active/active",
+      "intendedFile": "disaster-recovery-workloads-on-aws.pdf",
+      "split": "calibration"
+    },
+    {
+      "id": "in-30",
+      "type": "IN_CORPUS",
+      "question": "What does AWS Elastic Disaster Recovery do?",
+      "expected": [
+        {
+          "file": "disaster-recovery-workloads-on-aws.pdf",
+          "pages": [
+            26
+          ]
+        }
+      ],
+      "evidence": "AWS Elastic Disaster Recovery (DRS) continuously replicates",
+      "intendedFile": "disaster-recovery-workloads-on-aws.pdf",
+      "split": "calibration"
+    },
+    {
+      "id": "in-31",
+      "type": "IN_CORPUS",
+      "question": "Why shouldn't staging servers keep running overnight and on weekends?",
+      "expected": [
+        {
+          "file": "wellarchitected-cost-optimization-pillar.pdf",
+          "pages": [
+            8
+          ]
+        }
+      ],
+      "evidence": "Pay only for the computing resources you consume",
+      "intendedFile": "wellarchitected-cost-optimization-pillar.pdf",
+      "tags": [
+        "paraphrase"
+      ],
+      "split": "calibration"
+    },
+    {
+      "id": "in-32",
+      "type": "IN_CORPUS",
+      "question": "How can a platform heal itself without anyone being paged?",
+      "expected": [
+        {
+          "file": "wellarchitected-reliability-pillar.pdf",
+          "pages": [
+            12
+          ]
+        }
+      ],
+      "evidence": "you can run automation when a threshold is breached",
+      "intendedFile": "wellarchitected-reliability-pillar.pdf",
+      "tags": [
+        "paraphrase"
+      ],
+      "split": "holdout"
+    },
+    {
+      "id": "out-aws-01",
+      "type": "OUT_AWS",
+      "question": "What is the default maximum number of concurrent executions for AWS Lambda per Region in a new account?",
+      "absentTerms": [
+        "1,000 concurrent",
+        "1000 concurrent"
+      ],
+      "split": "calibration"
+    },
+    {
+      "id": "out-aws-02",
+      "type": "OUT_AWS",
+      "question": "How much does Amazon S3 Standard storage cost per GB per month in us-east-1?",
+      "absentTerms": [
+        "$0.023",
+        "GB-month"
+      ],
+      "split": "calibration"
+    },
+    {
+      "id": "out-aws-03",
+      "type": "OUT_AWS",
+      "question": "What is the maximum size of a single object in Amazon S3?",
+      "absentTerms": [
+        "5 TB",
+        "5 TiB",
+        "5 terabytes"
+      ],
+      "split": "calibration"
+    },
+    {
+      "id": "out-aws-04",
+      "type": "OUT_AWS",
+      "question": "What is the maximum size of an item in Amazon DynamoDB?",
+      "absentTerms": [
+        "400 KB",
+        "400 KiB"
+      ],
+      "split": "holdout"
     }
   ]
 }

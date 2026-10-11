@@ -11,6 +11,7 @@ package com.demo.agentfw.eval;
  * @param expectedFusedRank  position of the first answer-bearing page in the fused list; null if absent or not applicable
  * @param inTop5Depth20      an answer-bearing page is in the final 5 when reranking 20
  * @param inTop5Depth12      the same when reranking only the fused top 12
+ * @param paraphrase         the question has little keyword overlap with its page (tests the semantic path)
  */
 public record QuestionOutcome(
         String id,
@@ -25,7 +26,8 @@ public record QuestionOutcome(
         boolean inTop5Depth12,
         int truncatedPairs,
         long rerankMillis,
-        long totalMillis) {
+        long totalMillis,
+        boolean paraphrase) {
 
     public boolean inCorpus() {
         return "IN_CORPUS".equals(type);

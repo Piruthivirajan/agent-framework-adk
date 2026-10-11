@@ -15,11 +15,11 @@ class CalibrationReportTest {
     private static QuestionOutcome in(String id, String split, double d20, double d12, Integer expectedRank,
                                       boolean top5d20, boolean top5d12) {
         return new QuestionOutcome(id, "IN_CORPUS", split, "question " + id, d20, "doc p1", d12, expectedRank,
-                top5d20, top5d12, 0, 100, 200);
+                top5d20, top5d12, 0, 100, 200, false);
     }
 
     private static QuestionOutcome out(String id, String type, String split, double d20) {
-        return new QuestionOutcome(id, type, split, "question " + id, d20, "doc p9", d20, null, false, false, 0, 100, 200);
+        return new QuestionOutcome(id, type, split, "question " + id, d20, "doc p9", d20, null, false, false, 0, 100, 200, false);
     }
 
     private static List<QuestionOutcome> sample() {
@@ -84,5 +84,57 @@ class CalibrationReportTest {
         assertThat(md).contains("| calibration | 3 | 3 | 2 | 3 | 2 |");
         assertThat(md).contains("| holdout | 1 | 1 | 1 | 1 | 1 |");
         assertThat(md).contains("| all | 4 | 4 | 3 | 4 | 3 |");
+    }
+
+    @Test
+    void comparisonShowsBothRunsSideBySideWithAVerdict() {
+        List<QuestionOutcome> baseline = sample();
+        List<QuestionOutcome> variant = sample().stream()
+                .map(q -> q.id().equals("in-3")
+                        ? in("in-3", "calibration", 6.0, 6.0, 4, true, true)      // answer page moves from fused rank 15 to 4
+                        : q).toList();
+        // make the baseline miss in-3 in the final top 5, so the variant is a visible improvement
+        baseline = baseline.stream()
+                .map(q -> q.id().equals("in-3") ? in("in-3", "calibration", 4.0, 4.0, 15, false, false) : q).toList();
+
+        String md = CalibrationReport.renderComparison(
+                new CalibrationRun("baseline", "headers kept", CTX, baseline),
+                new CalibrationRun("stripped", "headers removed", CTX, variant));
+
+        assertThat(md).contains("# Grounding threshold calibration: baseline vs stripped");
+        assertThat(md).contains("| What differs | headers kept | headers removed |");
+        assertThat(md).contains("| answer page in final top 5 (rerank 20) | 3 | 4 | +1 |");
+        assertThat(md).contains("stripped finds the answer page in 1 more question(s) (3 to 4 of 4)");
+        assertThat(md).contains("## Per question").contains("# Detail: baseline").contains("# Detail: stripped");
+        assertThat(md).contains("| in-3 | IN_CORPUS | 4.00 | 6.00 | 15 | 4 | no | yes |");
+    }
+
+    @Test
+    void comparisonSaysWhenNothingImproved() {
+        String md = CalibrationReport.renderComparison(
+                new CalibrationRun("a", "x", CTX, sample()), new CalibrationRun("b", "y", CTX, sample()));
+
+        assertThat(md).contains("**Verdict on final top 5 (rerank 20):** no change (4 of 4)");
+    }
+
+    @Test
+    void aSavedRunSurvivesAJsonRoundTrip() {
+        tools.jackson.databind.json.JsonMapper mapper = tools.jackson.databind.json.JsonMapper.builder().build();
+        CalibrationRun run = new CalibrationRun("baseline", "note", CTX, sample());
+
+        CalibrationRun back = mapper.readValue(mapper.writeValueAsString(run), CalibrationRun.class);
+
+        assertThat(back).isEqualTo(run);
+    }
+
+    @Test
+    void paraphrasedQuestionsGetTheirOwnRecallRow() {
+        List<QuestionOutcome> o = new ArrayList<>(sample());
+        o.add(new QuestionOutcome("in-p", "IN_CORPUS", "calibration", "paraphrased", 3.0, "doc p1", 3.0, 7,
+                true, true, 0, 100, 200, true));
+
+        String md = CalibrationReport.render(o, CTX);
+
+        assertThat(md).contains("| paraphrased (semantic path) | 1 | 1 | 1 | 1 | 1 |");
     }
 }

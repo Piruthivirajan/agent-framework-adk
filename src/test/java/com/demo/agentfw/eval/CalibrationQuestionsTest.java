@@ -19,10 +19,12 @@ class CalibrationQuestionsTest {
     void theCommittedQuestionFileIsComplete() {
         List<CalibrationQuestion> all = CalibrationQuestions.load();
 
-        assertThat(all).hasSize(36);
-        assertThat(all.stream().filter(q -> q.type().equals("IN_CORPUS"))).hasSize(24);
+        assertThat(all).hasSize(48);
+        assertThat(all.stream().filter(q -> q.type().equals("IN_CORPUS"))).hasSize(32);
         assertThat(all.stream().filter(q -> q.type().equals("OUT_FAR"))).hasSize(6);
         assertThat(all.stream().filter(q -> q.type().equals("OUT_NEAR"))).hasSize(6);
+        assertThat(all.stream().filter(q -> q.type().equals("OUT_AWS"))).hasSize(4);
+        assertThat(all.stream().filter(CalibrationQuestion::paraphrase)).hasSize(2);
 
         Set<String> ids = new HashSet<>();
         for (CalibrationQuestion q : all) {
@@ -36,13 +38,13 @@ class CalibrationQuestionsTest {
                 assertThat(q.expected() == null || q.expected().isEmpty()).as(q.id()).isTrue();
             }
         }
-        assertThat(all.stream().filter(CalibrationQuestion::holdout).count()).isEqualTo(8);
+        assertThat(all.stream().filter(CalibrationQuestion::holdout).count()).isEqualTo(11);
     }
 
     @Test
     void everyTypeHasAHoldoutSoTheThresholdCanBeChecked() {
         List<CalibrationQuestion> all = CalibrationQuestions.load();
-        for (String type : List.of("IN_CORPUS", "OUT_FAR", "OUT_NEAR")) {
+        for (String type : List.of("IN_CORPUS", "OUT_FAR", "OUT_NEAR", "OUT_AWS")) {
             assertThat(all.stream().anyMatch(q -> q.type().equals(type) && q.holdout())).as(type).isTrue();
             assertThat(all.stream().anyMatch(q -> q.type().equals(type) && !q.holdout())).as(type).isTrue();
         }
@@ -51,7 +53,7 @@ class CalibrationQuestionsTest {
     @Test
     void outcomeIsDerivedFromTheTraceForBothDepths() {
         CalibrationQuestion q = new CalibrationQuestion("in-x", "IN_CORPUS", "question", "calibration",
-                List.of(new CalibrationQuestion.Expected("wellarchitected-security-pillar.pdf", List.of(47))));
+                List.of(new CalibrationQuestion.Expected("wellarchitected-security-pillar.pdf", List.of(47))), null);
 
         // 14 scored passages; the answer page (file/page 47) was fused rank 14 and reranked first
         List<RetrievalTrace.FusedCandidate> fused = new java.util.ArrayList<>();
