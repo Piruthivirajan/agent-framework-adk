@@ -105,7 +105,7 @@ public class MapReduceSummarizer {
         log.info("summary map-reduce chars={} segments={} parallelism={}", text.length(), segments.size(),
                 props.parallelism());
 
-        List<String> partials = mapParallel(segments, calls, report);
+        List<String> partials = mapParallel(segments, task, calls, report);
         int rounds = 0;
         while (true) {
             rounds++;
@@ -126,7 +126,8 @@ public class MapReduceSummarizer {
 
     // ---- map ------------------------------------------------------------------------------------
 
-    private List<String> mapParallel(List<String> segments, AtomicInteger calls, Consumer<Progress> report) {
+    private List<String> mapParallel(List<String> segments, String task, AtomicInteger calls,
+                                     Consumer<Progress> report) {
         int n = segments.size();
         report.accept(new Progress("summarizing parts", 0, n));
         ExecutorService pool = Executors.newFixedThreadPool(Math.min(props.parallelism(), n));
@@ -138,8 +139,10 @@ public class MapReduceSummarizer {
                 futures.add(CompletableFuture.supplyAsync(() -> {
                     String partial = call("Part " + (index + 1) + " of " + n,
                             "This is part " + (index + 1) + " of " + n + " of a longer document. Write a dense "
-                                    + "summary of this part only, in at most about 200 words. Keep names, numbers "
-                                    + "and decisions.\n\n<document>\n" + segments.get(index) + "\n</document>",
+                                    + "plain summary of this part only, in at most about 200 words. Keep names, "
+                                    + "numbers and decisions. The reader's overall request is given only so that you "
+                                    + "keep what matters for it; do not apply its format here. Request: " + task
+                                    + "\n\n<document>\n" + segments.get(index) + "\n</document>",
                             calls);
                     synchronized (done) {
                         done[0]++;

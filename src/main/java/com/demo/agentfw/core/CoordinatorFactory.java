@@ -8,7 +8,9 @@ import com.google.genai.types.GenerateContentConfig;
 import com.google.genai.types.ThinkingConfig;
 import org.springframework.stereotype.Component;
 
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 /**
  * Builds the coordinator from the registered plugins and caches its runner. The coordinator only
@@ -27,6 +29,7 @@ public class CoordinatorFactory {
     private final ModelFactory models;
     private final LlmProperties props;
     private InMemoryRunner runner;
+    private final Map<String, InMemoryRunner> agentRunners = new HashMap<>();
 
     public CoordinatorFactory(AgentRegistry registry, ModelFactory models, LlmProperties props) {
         this.registry = registry;
@@ -41,12 +44,29 @@ public class CoordinatorFactory {
         return runner;
     }
 
+    /**
+     * A runner whose root is one plugin's agent, for the code rule that sends an attachment straight to
+     * the file agent without a coordinator model call.
+     */
+    public synchronized InMemoryRunner agentRunner(String pluginName) {
+        return agentRunners.computeIfAbsent(pluginName, name -> {
+            AgentPlugin plugin = registry.plugins().stream().filter(p -> p.name().equals(name)).findFirst()
+                    .orElseThrow(() -> new IllegalStateException("No agent plugin named '" + name + "'"));
+            return new InMemoryRunner(plugin.build(agentContext()));
+        });
+    }
+
     public synchronized void invalidate() {
         runner = null;
+        agentRunners.clear();
     }
 
     public RunConfig runConfig() {
         return RunConfig.builder().maxLlmCalls(props.maxLlmCalls()).build();
+    }
+
+    private AgentContext agentContext() {
+        return new AgentContext(models.create(), config(props.agentThinkingBudget()));
     }
 
     LlmAgent build() {

@@ -1,5 +1,7 @@
 package com.demo.agentfw.core;
 
+import com.demo.agentfw.agents.file.FileAgentPlugin;
+import com.demo.agentfw.agents.file.FileSummaryLedger;
 import com.demo.agentfw.agents.rag.GroundingVerifier;
 import com.demo.agentfw.agents.rag.MalformedAnswerRepair;
 import com.demo.agentfw.agents.rag.RagAgentPlugin;
@@ -7,6 +9,13 @@ import com.demo.agentfw.agents.rag.RagProperties;
 import com.demo.agentfw.agents.rag.RetrievalLedger;
 import com.demo.agentfw.agents.rag.SearchDocumentsTool;
 import com.demo.agentfw.agents.rag.TestRetrieval;
+import com.demo.agentfw.files.FileProperties;
+import com.demo.agentfw.files.InMemoryUploadStore;
+import com.demo.agentfw.files.MapReduceSummarizer;
+import com.demo.agentfw.files.SummaryProperties;
+import com.demo.agentfw.files.TextExtractor;
+import com.demo.agentfw.files.UploadService;
+import com.demo.agentfw.files.UploadedFile;
 import com.demo.agentfw.retrieval.GroundingDecision;
 import com.google.adk.models.BaseLlm;
 import com.google.adk.models.LlmRequest;
@@ -15,6 +24,7 @@ import org.junit.jupiter.api.Test;
 
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.DoubleUnaryOperator;
 
@@ -29,6 +39,8 @@ class ChatServiceTest {
 
     private static final String TOOL_QUOTE =
             "provides a consistent process for you to review and measure your workloads";
+    private static final TextExtractor EXTRACTOR = new TextExtractor();   // slow to build, shared
+
     private static final String GOOD_ANSWER = "{\"status\":\"ANSWERED\",\"claims\":[{\"text\":\"The AWS Well-Architected "
             + "Tool provides a consistent process to review workloads.\",\"ref\":\"r1c1\",\"quote\":\"" + TOOL_QUOTE + "\"}]}";
 
@@ -38,6 +50,13 @@ class ChatServiceTest {
         final RetrievalLedger ledger = new RetrievalLedger();
         final AtomicReference<String> ragFinal = new AtomicReference<>("{\"status\":\"NOT_FOUND\"}");
         final AtomicReference<String> coordinatorProse = new AtomicReference<>("coordinator prose");
+        final AtomicReference<String> coordinatorTool = new AtomicReference<>("rag_agent");
+        final AtomicReference<String> coordinatorRequest = new AtomicReference<>("the user's question");
+        final InMemoryUploadStore uploadStore = new InMemoryUploadStore();
+        final UploadService uploads = new UploadService(EXTRACTOR, uploadStore, FileProperties.defaults());
+        final AtomicReference<TextGenerator> fileModel = new AtomicReference<>(
+                (system, user) -> "SUMMARY of: " + user.substring(user.indexOf("<document>") + 11,
+                        Math.min(user.length(), user.indexOf("<document>") + 40)));
         final AtomicReference<String> repairReply = new AtomicReference<>("{\"status\":\"NOT_FOUND\"}");
         final java.util.concurrent.atomic.AtomicInteger repairCalls = new java.util.concurrent.atomic.AtomicInteger();
         final AtomicReference<String> repairInput = new AtomicReference<>();
@@ -64,14 +83,19 @@ class ChatServiceTest {
                     return "scripted";
                 }
             };
-            CoordinatorFactory coordinators = new CoordinatorFactory(new AgentRegistry(List.of(plugin)), factory,
+            FileSummaryLedger fileLedger = new FileSummaryLedger();
+            FileAgentPlugin filePlugin = new FileAgentPlugin(uploads, new MapReduceSummarizer(
+                    (system, user) -> fileModel.get().generate(system, user), SummaryProperties.defaults()),
+                    fileLedger);
+            CoordinatorFactory coordinators = new CoordinatorFactory(
+                    new AgentRegistry(List.of(plugin, filePlugin)), factory,
                     new LlmProperties("fake", "scripted", "", null, null, 12));
             MalformedAnswerRepair repairer = new MalformedAnswerRepair((system, user) -> {
                 repairCalls.incrementAndGet();
                 repairInput.set(user);
                 return repairReply.get();
             });
-            chat = new ChatService(coordinators, ledger, new GroundingVerifier(ledger), repairer);
+            chat = new ChatService(coordinators, ledger, new GroundingVerifier(ledger), repairer, fileLedger);
             llm.script(this::respond);
         }
 
@@ -79,7 +103,7 @@ class ChatServiceTest {
             if (req.tools().containsKey("rag_agent")) {                       // the coordinator
                 return ScriptedLlm.hasToolResult(req)
                         ? ScriptedLlm.text(coordinatorProse.get())
-                        : ScriptedLlm.call("rag_agent", Map.of("request", "the user's question"));
+                        : ScriptedLlm.call(coordinatorTool.get(), Map.of("request", coordinatorRequest.get()));
             }
             if (req.tools().containsKey("searchDocuments")) {                 // the RAG agent
                 return ScriptedLlm.hasToolResult(req)
@@ -88,6 +112,92 @@ class ChatServiceTest {
             }
             return ScriptedLlm.text("unexpected agent");
         }
+    }
+
+    // ---- the file agent ---------------------------------------------------------------------------
+
+    private static final byte[] NOTES = ("Quarterly notes. The migration to queues finished in March. "
+            + "Costs fell by twelve percent.").getBytes(java.nio.charset.StandardCharsets.UTF_8);
+
+    @Test
+    void scenarioC_anAttachmentGoesToTheFileAgentByCodeWithoutACoordinatorModelCall() {
+        Rig rig = new Rig(i -> 5.0 - i, true);
+        UploadedFile file = rig.uploads.upload("tab-1", "notes.txt", NOTES);
+
+        ChatResult r = rig.chat.chat("tab-1", "Summarize this file", file.id());
+
+        assertThat(r.route()).isEqualTo("file_agent");
+        assertThat(r.answer()).startsWith("SUMMARY of: ").contains("Quarterly notes");
+        assertThat(r.grounded()).isFalse();                                   // labelled, not quote-verified
+        assertThat(r.sources()).isEmpty();
+        assertThat(r.file().name()).isEqualTo("notes.txt");
+        assertThat(r.file().strategy()).isEqualTo("SINGLE_PASS");
+        assertThat(r.toolCalls()).containsExactly("file_agent");
+        assertThat(rig.llm.requests()).isEmpty();                             // no coordinator call at all
+    }
+
+    @Test
+    void theCoordinatorCanSendAFollowUpToTheFileAgentAndItFindsTheSessionsFile() {
+        Rig rig = new Rig(i -> 5.0 - i, true);
+        rig.uploads.upload("tab-1", "notes.txt", NOTES);
+        rig.coordinatorTool.set("file_agent");
+        rig.coordinatorRequest.set("Make the summary of that file shorter");
+
+        ChatResult r = rig.chat.chat("tab-1", "Make the summary of that file shorter");
+
+        assertThat(r.route()).isEqualTo("file_agent");
+        assertThat(r.answer()).contains("Quarterly notes");
+        assertThat(r.toolCalls()).containsExactly("file_agent");
+        assertThat(rig.llm.requests()).hasSize(1);                            // one routing call, then no rephrasing
+    }
+
+    @Test
+    void aRequestThatNamesAFileUsesThatFileNotTheLatestOne() {
+        Rig rig = new Rig(i -> 5.0 - i, true);
+        rig.uploads.upload("tab-1", "budget.txt", "Budget file text about money.".getBytes());
+        rig.uploads.upload("tab-1", "notes.txt", NOTES);
+        rig.coordinatorTool.set("file_agent");
+        rig.coordinatorRequest.set("What does budget.txt say?");
+
+        ChatResult r = rig.chat.chat("tab-1", "What does budget.txt say?");
+
+        assertThat(r.file().name()).isEqualTo("budget.txt");
+    }
+
+    @Test
+    void aFileFromAnotherSessionIsNeverUsed() {
+        Rig rig = new Rig(i -> 5.0 - i, true);
+        rig.uploads.upload("tab-2", "private.txt", NOTES);
+        rig.coordinatorTool.set("file_agent");
+
+        ChatResult r = rig.chat.chat("tab-1", "Summarize my file");
+
+        assertThat(r.file()).isNull();
+        assertThat(r.answer()).contains("No file has been uploaded in this session");
+    }
+
+    @Test
+    void anAttachmentThatHasExpiredSaysSoInsteadOfFallingBackToAnotherFile() {
+        Rig rig = new Rig(i -> 5.0 - i, true);
+        rig.uploads.upload("tab-1", "other.txt", NOTES);
+
+        ChatResult r = rig.chat.chat("tab-1", "Summarize", "00000000-0000-0000-0000-000000000000");
+
+        assertThat(r.file()).isNull();
+        assertThat(r.answer()).contains("no longer available");
+    }
+
+    @Test
+    void aSummarizationFailureIsAChatFailureWithTheReasonNotAStackTrace() {
+        Rig rig = new Rig(i -> 5.0 - i, true);
+        UploadedFile file = rig.uploads.upload("tab-1", "notes.txt", NOTES);
+        rig.fileModel.set((system, user) -> {
+            throw new IllegalStateException("quota exhausted");
+        });
+
+        assertThatThrownBy(() -> rig.chat.chat("tab-1", "Summarize", file.id()))
+                .isInstanceOf(ChatService.ChatFailedException.class)
+                .hasMessageContaining("quota exhausted");
     }
 
     @Test
@@ -291,7 +401,7 @@ class ChatServiceTest {
         ChatService chat = new ChatService(coordinators, ledger, new GroundingVerifier(ledger),
                 new MalformedAnswerRepair((system, user) -> {
                     throw new IllegalStateException("no repair expected");
-                }));
+                }), new FileSummaryLedger());
         llm.script(req -> req.tools().containsKey("prose_agent")
                 ? ScriptedLlm.call("prose_agent", Map.of("request", "q"))      // the coordinator picks the other agent
                 : ScriptedLlm.text("Lambda allows 1,000 concurrent executions, unverified."));

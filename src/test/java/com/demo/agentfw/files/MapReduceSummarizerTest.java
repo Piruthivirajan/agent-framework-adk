@@ -123,8 +123,8 @@ class MapReduceSummarizerTest {
             assertThat(reduce).contains("[Part " + i + "]").contains("S" + i + " ");
         }
         assertThat(reduce.indexOf("[Part 1]")).isLessThan(reduce.indexOf("[Part " + segments + "]"));
-        assertThat(model.users.stream().filter(u -> u.contains("This is part")))
-                .allMatch(u -> !u.contains("Give me the key risks."));  // map prompts are neutral
+        assertThat(model.users.stream().filter(u -> u.contains("This is part")))   // map prompts: relevance only
+                .allMatch(u -> u.contains("do not apply its format here"));
     }
 
     @Test

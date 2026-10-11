@@ -83,7 +83,7 @@ Decisions (user): file agent shape decided by the step 0 spike; **two paths** to
 - [x] 1. Verifier: one retry for malformed JSON, RAG prompt line on numbers, measured on the same 48 questions
 - [x] 2. Uploads: Tika parsing, `uploads` collection (TTL), limits, error messages
 - [x] 3. `MapReduceSummarizer` (single pass, map-reduce, hierarchical reduce, failure behaviour)
-- [ ] 4. `FileAgentPlugin`, fast path by code, coordinator tool with session files, summaries labelled
+- [x] 4. `FileAgentPlugin`, fast path by code, coordinator tool with session files, summaries labelled
 - [ ] 5. Follow-up rewriting from chat history (3 follow-up pairs in tests)
 - [ ] 6. API: `/api/chat`, `/api/files`, error handler; SSE stage events
 - [ ] 7. Knowledge base: `POST /api/kb/documents`, single-file ingestion with progress, no-text-layer rejection
@@ -97,6 +97,14 @@ Decisions (user): file agent shape decided by the step 0 spike; **two paths** to
 ## Log
 
 <!-- Newest first. One entry per task: date, what was built, what was verified. -->
+
+### 2026-10-11: Day 5 step 4, file agent plugin and the two paths to it
+- **`FileAgentPlugin`** (`agents/file`): an `AgentPlugin` whose agent is a custom `BaseAgent` that runs `MapReduceSummarizer` in code (step 0 decision). It never asks a model which file or which tool; code resolves the file in this order: the attachment of this turn (never falls back to another file; an expired id says "no longer available"), a `fileId=` in the request, an uploaded file whose name the request mentions (later upload wins), the session's most recent upload.
+- **Path 1, the code rule (fast path):** `ChatService.chat(sessionId, text, fileId)` with a `fileId` runs the file agent directly through `CoordinatorFactory.agentRunner("file_agent")`: **no coordinator model call** (tested: zero requests to the model for routing).
+- **Path 2, the coordinator tool:** `file_agent` is registered like any plugin, so the coordinator's tool list has `file_agent` and `rag_agent`; a text turn such as "make that summary shorter" or "what does that file say about X" is routed by the coordinator model. `AgentTool` exposes only a `request` string, so the file is found by the order above, using the chat session id that `ChatService` passes in the turn state (`TurnState`: `requestId`, `chatSessionId`, `attachedFileId`; verified to reach the nested agent). The description tells the coordinator to use it for the user's own uploaded files and not for the reference documents; whether the real model routes follow-ups correctly is measured live in step 5 and step 9.
+- **Result path:** like retrieved chunks, the summary is read from a `FileSummaryLedger` keyed by the request id, not from the model's prose. `ChatResult.file` (name, type, chars, strategy, segments, model calls, ms) with `grounded=false`: a labelled, not quote-verified summary. No uploaded file is a normal reply with a clear message; a summarization failure is a `ChatFailedException` carrying the reason.
+- **Map prompt change:** the user's request now reaches the map prompts as relevance context ("do not apply its format here"), so "what does the file say about backups" keeps the backup details of each part; format instructions still apply only in the final reduce.
+- Verified: BUILD SUCCESS, 245 tests (scenario C with a scripted model, cross-session isolation, expiry, failure).
 
 ### 2026-10-11: Day 5 step 3, `MapReduceSummarizer`
 - **Single pass** up to `agentfw.summary.single-pass-max-chars` (30,000, starting value): one call, the user's instruction applied directly. **Map-reduce** above it: split at paragraph boundaries (then line breaks, sentence ends, spaces, hard cut; no text lost, tested) into segments of about 15,000 characters; each segment gets a *neutral* "dense partial summary" prompt (the instruction is applied only at the end, so "three bullet points" does not produce three per segment); partials are combined in order by one reduce call; partials too long for one call (`reduce-max-chars`) are reduced in groups, repeatedly (at most 6 rounds, and each round must shrink).

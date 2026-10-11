@@ -25,7 +25,7 @@ import java.util.Map;
 @Component
 public class SearchDocumentsTool {
 
-    public static final String REQUEST_ID_KEY = "requestId";
+    public static final String REQUEST_ID_KEY = com.demo.agentfw.core.TurnState.REQUEST_ID;
     static final String METHOD = "searchDocuments";
 
     private static final Logger log = LoggerFactory.getLogger(SearchDocumentsTool.class);

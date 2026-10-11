@@ -19,6 +19,8 @@ import java.util.List;
  * @param modelOutput the RAG agent's raw output, kept for debugging and the report; null without one
  * @param requestId   correlates this turn with the log lines
  * @param totalMillis wall time of the whole turn
+ * @param file        set when the file agent summarized a file: the answer is then a labelled summary that is
+ *                    not quote-verified ({@code grounded} is false); null otherwise
  */
 public record ChatResult(
         String answer,
@@ -30,7 +32,21 @@ public record ChatResult(
         List<String> toolCalls,
         String modelOutput,
         String requestId,
-        long totalMillis) {
+        long totalMillis,
+        FileSummary file) {
+
+    /** Without a file summary (every RAG and no-tool result). */
+    public ChatResult(String answer, String route, boolean grounded, List<GroundingVerifier.Source> sources,
+                      List<RetrievalTrace> retrievals, Verification verification, List<String> toolCalls,
+                      String modelOutput, String requestId, long totalMillis) {
+        this(answer, route, grounded, sources, retrievals, verification, toolCalls, modelOutput, requestId,
+                totalMillis, null);
+    }
+
+    /** What the file agent summarized and how, for the "summary of file X" label and the trace panel. */
+    public record FileSummary(String fileId, String name, String contentType, int chars, String strategy,
+                              int segments, int modelCalls, long millis) {
+    }
 
     /**
      * @param problems          reasons the verifier rejected the answer (empty when it passed or when the model

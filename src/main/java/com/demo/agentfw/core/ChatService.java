@@ -1,5 +1,7 @@
 package com.demo.agentfw.core;
 
+import com.demo.agentfw.agents.file.FileAgentPlugin;
+import com.demo.agentfw.agents.file.FileSummaryLedger;
 import com.demo.agentfw.agents.rag.GroundingVerifier;
 import com.demo.agentfw.agents.rag.MalformedAnswerRepair;
 import com.demo.agentfw.agents.rag.RagAgentPlugin;
@@ -50,13 +52,15 @@ public class ChatService {
     private final RetrievalLedger ledger;
     private final GroundingVerifier verifier;
     private final MalformedAnswerRepair repair;
+    private final FileSummaryLedger fileLedger;
 
     public ChatService(CoordinatorFactory coordinators, RetrievalLedger ledger, GroundingVerifier verifier,
-                       MalformedAnswerRepair repair) {
+                       MalformedAnswerRepair repair, FileSummaryLedger fileLedger) {
         this.coordinators = coordinators;
         this.ledger = ledger;
         this.verifier = verifier;
         this.repair = repair;
+        this.fileLedger = fileLedger;
     }
 
     /** A turn failed before an answer existed (the model could not be reached, a limit was hit). */
@@ -66,16 +70,33 @@ public class ChatService {
         }
     }
 
+    /** A text-only turn: the coordinator model chooses the agent. */
     public ChatResult chat(String sessionId, String text) {
+        return chat(sessionId, text, null);
+    }
+
+    /**
+     * One turn. With {@code fileId} (an attachment) the file agent is called by a code rule and no
+     * coordinator model call is made; without it the coordinator model routes the text.
+     */
+    public ChatResult chat(String sessionId, String text, String fileId) {
         long start = System.nanoTime();
         String requestId = UUID.randomUUID().toString();
+        boolean attachment = fileId != null && !fileId.isBlank();
         try {
-            InMemoryRunner runner = coordinators.runner();
+            InMemoryRunner runner = attachment ? coordinators.agentRunner(FileAgentPlugin.NAME)
+                    : coordinators.runner();
             ensureSession(runner, sessionId);
+            Map<String, Object> state = new HashMap<>();
+            state.put(TurnState.REQUEST_ID, requestId);
+            state.put(TurnState.SESSION_ID, sessionId);
+            if (attachment) {
+                state.put(TurnState.FILE_ID, fileId);
+            }
             List<Event> events = runner.runAsync(USER_ID, sessionId, Content.fromParts(Part.fromText(text)),
-                            coordinators.runConfig(), Map.of(SearchDocumentsTool.REQUEST_ID_KEY, requestId))
+                            coordinators.runConfig(), state)
                     .toList().blockingGet();
-            return decide(events, requestId, start);
+            return decide(events, requestId, start, attachment);
         } catch (ChatFailedException e) {
             throw e;
         } catch (RuntimeException e) {
@@ -83,10 +104,11 @@ public class ChatService {
             throw new ChatFailedException("The model could not complete the request: " + e.getMessage(), e);
         } finally {
             ledger.clear(requestId);
+            fileLedger.clear(requestId);
         }
     }
 
-    private ChatResult decide(List<Event> events, String requestId, long start) {
+    private ChatResult decide(List<Event> events, String requestId, long start, boolean attachment) {
         List<String> toolCalls = new ArrayList<>();
         Optional<String> ragOutput = Optional.empty();
         for (Event event : events) {
@@ -101,7 +123,13 @@ public class ChatService {
                 .map(RetrievalLedger.Retrieval::trace).toList();
 
         ChatResult result;
-        if (ragOutput.isPresent()) {
+        Optional<FileSummaryLedger.Outcome> fileOutcome = fileLedger.take(requestId);
+        if (attachment && toolCalls.isEmpty()) {
+            toolCalls.add(FileAgentPlugin.NAME);          // the code rule, not a model call, chose the agent
+        }
+        if (fileOutcome.isPresent()) {
+            result = fileResult(fileOutcome.get(), traces, toolCalls, requestId, start);
+        } else if (ragOutput.isPresent()) {
             String output = ragOutput.get();
             boolean repaired = false;
             if (verifier.isMalformedJson(output)) {
@@ -131,6 +159,32 @@ public class ChatService {
                 result.route(), result.grounded(), result.verification().problems().size(), toolCalls, traces.size(),
                 result.totalMillis());
         return result;
+    }
+
+    /**
+     * The file agent's result. The summary is read from the ledger, not from the model's prose. It is
+     * labelled and not quote-verified ({@code grounded} false); a failure is thrown so the API can say
+     * why in plain words.
+     */
+    private ChatResult fileResult(FileSummaryLedger.Outcome o, List<com.demo.agentfw.retrieval.RetrievalTrace> traces,
+                                  List<String> toolCalls, String requestId, long start) {
+        switch (o.status()) {
+            case FAILED -> throw new ChatFailedException(o.message(), null);
+            case NO_FILE -> {
+                return new ChatResult(o.message(), FileAgentPlugin.NAME, false, List.of(), traces,
+                        new ChatResult.Verification(List.of("no uploaded file to work on"), false), toolCalls, null,
+                        requestId, millisSince(start));
+            }
+            default -> {
+                ChatResult.FileSummary info = new ChatResult.FileSummary(o.fileId(), o.fileName(), o.contentType(),
+                        o.chars(), o.strategy().name(), o.segments(), o.modelCalls(), o.millis());
+                log.info("chat request={} route=file_agent strategy={} segments={} ms={}", requestId, o.strategy(),
+                        o.segments(), millisSince(start));
+                return new ChatResult(o.summary(), FileAgentPlugin.NAME, false, List.of(), traces,
+                        new ChatResult.Verification(List.of(), false), toolCalls, null, requestId,
+                        millisSince(start), info);
+            }
+        }
     }
 
     /** The text of an AgentTool result: {@code {result=<text>}}; falls back to the first value. */
