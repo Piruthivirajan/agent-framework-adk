@@ -56,7 +56,7 @@ Decisions: `gemini-3.8-flash` for both agents, configurable by name, low thinkin
 - [x] 0. API spike (scripted model, one live call)
 - [x] 1. Plugin framework: `AgentPlugin`, `AgentRegistry`, `CoordinatorFactory`, `ModelFactory`, third-plugin test
 - [x] 2. Retrieval tool, `RetrievalLedger`, `RagAgentPlugin` (instruction and JSON contract); rename `GroundingDecision.OK`
-- [ ] 3. `GroundingVerifier` (quote and numeric support) and renderer
+- [x] 3. `GroundingVerifier` (quote and numeric support) and renderer
 - [ ] 4. `ChatService` with scripted-model scenario A and B tests
 - [ ] 5. Live scenarios A and B; thinking-budget measurement
 - [ ] 6. 48-question end-to-end run, `docs/END_TO_END.md`
@@ -81,6 +81,14 @@ Retrieval gate (done, Day 3): a low **floor** at -6.5 removes only clear junk; 3
 ## Log
 
 <!-- Newest first. One entry per task: date, what was built, what was verified. -->
+
+### 2026-10-11: Day 4 step 3, grounding verifier
+- `GroundingVerifier.verify(modelOutput, requestId)` is plain code after the model. The answer is shown only if **every** claim passes; otherwise the whole answer becomes "Not found in the reference documents." A claim passes when: its `ref` was returned by retrieval **in this request** (ledger lookup); its quote has at least 25 characters and 4 words (and at most 400); the quote occurs in that chunk's text after NFKC and whitespace normalisation, case and punctuation exact; every number in the claim's `text` also occurs in **its quote** (the chunk containing the number is not enough), with formats normalised (`1,000` = `1000`, `14.0` = `14`, `09` = `9`).
+- Rendering is by code: `claim text [file, p. N]` per claim, file and page from the ledger (the model cannot mis-cite). The quotes go in a separate `sources` list (`ref`, `file`, `page`, `quote`, de-duplicated), not in the answer text. Any prose or extra JSON fields outside the claims are never shown.
+- Fail closed: no JSON, wrong status, no claims, more than 6 claims, missing field, unknown ref, a ref from another request. `modelSaidNotFound` separates "the model itself said NOT_FOUND" from "the verifier rejected it", for the end-to-end report. All problems are listed, not only the first.
+- Limit, stated plainly: this guarantees provenance (the shown sentences have quotes that exist in retrieved documents), not entailment. The numeric rule closes the most dangerous gap (a real quote next to a figure from the model's memory). Word numbers ("fourteen") and unit or entity changes are not checked.
+- Tests (pure code): accepted claim and rendering; whitespace and no-break-space and line-break normalisation; NFKC ligature; number formats; de-duplicated sources; fences and prose around the JSON tolerated but never rendered; extra fields ignored; fabricated quote rejects the whole answer including good claims; real quote on the wrong chunk; unknown ref and cross-request ref; case sensitivity; short and long quotes; numeric support (a figure only in the chunk, not the quote, is rejected; 1,000 is not 1,000,000); eleven contract violations all fail closed.
+- Verified: BUILD SUCCESS, 163 tests.
 
 ### 2026-10-11: Day 4 step 2, search tool, ledger, RAG agent
 - `GroundingDecision.OK` renamed **`PASSED_FLOOR`** (the enum documents that it is not "grounded").
