@@ -48,9 +48,18 @@ public final class LimitedLlm extends BaseLlm {
                 .anyMatch(p -> p.functionResponse().isPresent());
         return Flowable.defer(() -> {
             long start = System.nanoTime();
-            return delegate.generateContent(limitedRequest, stream).doFinally(() ->
-                    log.info("llm call tools={} toolResult={} thinking={} ms={}", tools, carriesToolResult, thinking,
-                            (System.nanoTime() - start) / 1_000_000));
+            java.util.concurrent.atomic.AtomicLong firstResponse = new java.util.concurrent.atomic.AtomicLong(-1);
+            return delegate.generateContent(limitedRequest, stream)
+                    .doOnNext(r -> firstResponse.compareAndSet(-1, System.nanoTime()))
+                    .doFinally(() -> {
+                        long first = firstResponse.get();
+                        long end = System.nanoTime();
+                        // model = until the answer arrived; the stream can stay open while ADK runs the tools
+                        // the answer asked for, so the end of the stream is a different number
+                        log.info("llm call tools={} toolResult={} thinking={} model_ms={} stream_ms={}", tools,
+                                carriesToolResult, thinking, (first < 0 ? end - start : first - start) / 1_000_000,
+                                (end - start) / 1_000_000);
+                    });
         });
     }
 
