@@ -6,7 +6,8 @@ import time
 import urllib.request
 import uuid
 
-BASE = "http://localhost:8080"
+import os
+BASE = os.environ.get("BASE", "http://localhost:8080")
 NOTES = open(sys.argv[1], "rb").read()
 
 

@@ -261,6 +261,7 @@ Main settings (all in `src/main/resources/application.yml`, environment names in
 | `AGENTFW_MCP_SECRET_KEY` | empty | base64 of 32 random bytes; saves MCP servers encrypted in MongoDB |
 | `AGENTFW_SAMPLE_AGENT` | false | enables the sample `clock_agent` (a third agent, one class) |
 | `agentfw.llm.request-timeout-seconds` / `retries` | 60 / 1 | Gemini call timeout, retries on 429/503 |
+| `agentfw.llm.coordinator-model` | `gemini-3.5-flash-lite` | model of the coordinator only (empty = the agents' model) |
 | `agentfw.rag.speculative-search` | true | search starts while the coordinator routes |
 | `agentfw.rag.prefetch-first-search` | true | first search in code with the question as the query (one model call fewer) |
 | `agentfw.warmup.enabled` | true | one throwaway RAG turn after startup |

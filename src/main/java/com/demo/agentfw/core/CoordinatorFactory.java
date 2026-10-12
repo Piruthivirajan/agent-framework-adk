@@ -96,7 +96,7 @@ public class CoordinatorFactory {
         return LlmAgent.builder()
                 .name(COORDINATOR_NAME)
                 .description("Routes each user message to the right agent")
-                .model(model)
+                .model(models.createForRouting())
                 .instruction(instruction(registry.activePlugins()))
                 .generateContentConfig(config(props.coordinatorThinkingBudget()))
                 .tools(registry.agentTools(agentContext))

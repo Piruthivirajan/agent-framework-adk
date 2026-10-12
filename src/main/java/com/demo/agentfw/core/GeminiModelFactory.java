@@ -15,12 +15,19 @@ public class GeminiModelFactory implements ModelFactory {
 
     private final LlmProperties props;
     private final LlmLimitsProperties limits;
+    private final LlmRoutingProperties routing;
     private BaseLlm model;
+    private BaseLlm routingModel;
 
     @org.springframework.beans.factory.annotation.Autowired
-    public GeminiModelFactory(LlmProperties props, LlmLimitsProperties limits) {
+    public GeminiModelFactory(LlmProperties props, LlmLimitsProperties limits, LlmRoutingProperties routing) {
         this.props = props;
         this.limits = limits;
+        this.routing = routing;
+    }
+
+    public GeminiModelFactory(LlmProperties props, LlmLimitsProperties limits) {
+        this(props, limits, LlmRoutingProperties.none());
     }
 
     public GeminiModelFactory(LlmProperties props) {
@@ -39,6 +46,22 @@ public class GeminiModelFactory implements ModelFactory {
                     limits.retries());
         }
         return model;
+    }
+
+    @Override
+    public synchronized BaseLlm createForRouting() {
+        if (routing.coordinatorModel().isEmpty() || routing.coordinatorModel().equals(props.model())) {
+            return create();
+        }
+        if (routingModel == null) {
+            if (props.apiKey() == null || props.apiKey().isBlank()) {
+                throw new IllegalStateException(
+                        "No Gemini API key: set GOOGLE_API_KEY in .env (see .env.example) or the environment.");
+            }
+            routingModel = new LimitedLlm(new Gemini(routing.coordinatorModel(), props.apiKey()),
+                    limits.requestTimeoutSeconds(), limits.retries());
+        }
+        return routingModel;
     }
 
     @Override

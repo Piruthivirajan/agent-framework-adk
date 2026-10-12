@@ -7,5 +7,10 @@ public interface ModelFactory {
 
     BaseLlm create();
 
+    /** The model of the coordinator, which only routes. Defaults to the agents' model. */
+    default BaseLlm createForRouting() {
+        return create();
+    }
+
     String modelName();
 }
