@@ -61,6 +61,15 @@ public class SearchDocumentsTool {
         return search(requestId, query);
     }
 
+    /**
+     * True while this request has neither searched nor failed to search: the moment at which the first
+     * search can be made in code instead of by a model call. After a failure it is false, so a broken
+     * search is never retried in a loop.
+     */
+    boolean noSearchYet(String requestId) {
+        return ledger.retrievals(requestId).isEmpty() && ledger.failure(requestId).isEmpty();
+    }
+
     /** The tool's logic without the framework context, so it can be tested directly. */
     Map<String, Object> search(String requestId, String query) {
         List<RetrievalLedger.Retrieval> prior = ledger.retrievals(requestId);

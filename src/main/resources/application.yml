@@ -84,9 +84,12 @@ agentfw:
     max-failures: 5              # wrong passwords per client address ...
     lock-seconds: 300            # ... within this window, then the login is refused for the rest of it
     session-hours: 8
+  warmup:
+    enabled: true                # one throwaway RAG turn after startup, so the first user is not the cold one
   rag:
     max-searches: 2              # enforced in the search tool, not only in the prompt (docs/e2e/findings.md, section 7)
     stop-after-floor-miss: true  # a first search below the floor ends the turn: rewriting did not rescue any question
+    prefetch-first-search: true   # the first search runs in code with the question as the query: one model call fewer (about 2 s)
     # instruction-suffix: unset in production; the adversarial experiment sets it
   retrieval:
     fusion: RANK                 # RANK ($rankFusion) | SCORE ($scoreFusion) | JAVA_RRF

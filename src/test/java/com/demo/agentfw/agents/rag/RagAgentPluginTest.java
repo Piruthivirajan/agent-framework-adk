@@ -51,6 +51,105 @@ class RagAgentPluginTest {
                 : ScriptedLlm.call("searchDocuments", Map.of("query", "AWS Well-Architected Tool")));
     }
 
+    /** The model request that already carries the search result (the first one when the search is prefetched). */
+    private static LlmRequest requestWithToolResult(ScriptedLlm llm) {
+        return llm.requests().stream().filter(ScriptedLlm::hasToolResult).findFirst().orElseThrow();
+    }
+
+    private static final String QUESTION = "What is the AWS Well-Architected Tool?";
+
+    @Test
+    void theFirstSearchIsRunInCodeWithTheRequestAsTheQueryAndTheModelIsCalledOnlyOnce() {
+        List<String> queries = new java.util.ArrayList<>();
+        ScriptedLlm llm = searchThenAnswer(ANSWER);
+        SearchDocumentsTool tool = new SearchDocumentsTool(
+                TestRetrieval.service(TestRetrieval.sampleCandidates(), i -> 5.0 - i, queries::add), ledger,
+                RagProperties.defaults());
+        BaseAgent agent = new RagAgentPlugin(tool, RagProperties.defaults())
+                .build(new AgentContext(llm, GenerateContentConfig.builder().build()));
+
+        List<Event> events = run(agent, "req-1");
+
+        assertThat(queries).containsExactly(QUESTION);                 // the request text, not the model's wording
+        assertThat(llm.requests()).hasSize(1);                          // the "call the tool" model call was skipped
+        // the call that was not made by the model carries the placeholder signature Gemini 3 requires
+        var injectedCall = llm.requests().get(0).contents().stream()
+                .flatMap(c -> c.parts().orElse(List.of()).stream())
+                .filter(p -> p.functionCall().isPresent()).findFirst().orElseThrow();
+        assertThat(new String(injectedCall.thoughtSignature().orElseThrow(), java.nio.charset.StandardCharsets.UTF_8))
+                .isEqualTo("skip_thought_signature_validator");
+        assertThat(ScriptedLlm.hasToolResult(llm.requests().get(0))).isTrue();
+        assertThat(ledger.chunk("req-1", "r1c1")).isPresent();         // same refs, same ledger as before
+        assertThat(events.get(events.size() - 1).stringifyContent()).contains("ANSWERED");
+    }
+
+    @Test
+    void withoutPrefetchTheModelWritesTheFirstQueryAsBefore() {
+        List<String> queries = new java.util.ArrayList<>();
+        ScriptedLlm llm = searchThenAnswer(ANSWER);
+        RagProperties props = new RagProperties(2, true, "", false);
+        SearchDocumentsTool tool = new SearchDocumentsTool(
+                TestRetrieval.service(TestRetrieval.sampleCandidates(), i -> 5.0 - i, queries::add), ledger, props);
+        BaseAgent agent = new RagAgentPlugin(tool, props)
+                .build(new AgentContext(llm, GenerateContentConfig.builder().build()));
+
+        run(agent, "req-1");
+
+        assertThat(queries).containsExactly("AWS Well-Architected Tool");
+        assertThat(llm.requests()).hasSize(2);
+    }
+
+    @Test
+    void theModelMaySearchOnceMoreAfterThePrefetchedSearchButNotBeyondTheCap() {
+        List<String> queries = new java.util.ArrayList<>();
+        ScriptedLlm llm = new ScriptedLlm().script(req -> ScriptedLlm.call("searchDocuments",
+                Map.of("query", "keep searching")));                        // never answers
+        SearchDocumentsTool tool = new SearchDocumentsTool(
+                TestRetrieval.service(TestRetrieval.sampleCandidates(), i -> 5.0 - i, queries::add), ledger,
+                RagProperties.defaults());
+        BaseAgent agent = new RagAgentPlugin(tool, RagProperties.defaults())
+                .build(new AgentContext(llm, GenerateContentConfig.builder().build()));
+
+        try {
+            run(agent, "req-1");
+        } catch (RuntimeException expectedLoopGuard) {
+            // the model never answers; the call limit ends the run
+        }
+
+        assertThat(queries).containsExactly(QUESTION, "keep searching");   // prefetched search + one more, then refused
+    }
+
+    @Test
+    void aBrokenSearchIsNotRetriedInALoopByThePrefetch() {
+        ScriptedLlm llm = new ScriptedLlm().script(req -> ScriptedLlm.text("{\"status\":\"NOT_FOUND\"}"));
+        com.demo.agentfw.retrieval.ChunkSearch broken = (query, vector, settings) -> {
+            throw new IllegalStateException("database down");
+        };
+        com.demo.agentfw.retrieval.RetrievalService retrieval = new com.demo.agentfw.retrieval.RetrievalService(
+                new com.demo.agentfw.ingestion.FakeEmbeddingService(8, "fake"), broken,
+                new com.demo.agentfw.retrieval.Reranker() {
+                    @Override
+                    public Result rerank(String query, List<String> passages) {
+                        return new Result(new float[passages.size()], 0);
+                    }
+
+                    @Override
+                    public String modelName() {
+                        return "unused";
+                    }
+                },
+                new com.demo.agentfw.retrieval.RetrievalProperties(com.demo.agentfw.retrieval.FusionStrategy.RANK,
+                        400, 20, 20, 12, 5, 1.0, 1.0, "sigmoid", 60, -6.5, 3.3));
+        SearchDocumentsTool tool = new SearchDocumentsTool(retrieval, ledger, RagProperties.defaults());
+        BaseAgent agent = new RagAgentPlugin(tool, RagProperties.defaults())
+                .build(new AgentContext(llm, GenerateContentConfig.builder().build()));
+
+        run(agent, "req-9");
+
+        assertThat(ledger.failure("req-9")).isPresent();
+        assertThat(llm.requests()).hasSize(1);       // the model was called once, after the failed search
+    }
+
     @Test
     void declaresASearchToolWithOnlyAQueryParameter() {
         ScriptedLlm llm = searchThenAnswer(ANSWER);
@@ -68,7 +167,7 @@ class RagAgentPluginTest {
 
         List<Event> events = run(agent(llm, 5.0), "req-1");
 
-        LlmRequest followUp = llm.requests().get(1);
+        LlmRequest followUp = requestWithToolResult(llm);
         String toolResult = followUp.contents().stream()
                 .flatMap(c -> c.parts().orElse(List.of()).stream())
                 .filter(p -> p.functionResponse().isPresent())
@@ -86,7 +185,7 @@ class RagAgentPluginTest {
 
         run(agent(llm, -20.0), "req-2");
 
-        String toolResult = llm.requests().get(1).contents().stream()
+        String toolResult = requestWithToolResult(llm).contents().stream()
                 .flatMap(c -> c.parts().orElse(List.of()).stream())
                 .filter(p -> p.functionResponse().isPresent())
                 .map(p -> p.functionResponse().get().response().orElseThrow().toString())
@@ -116,7 +215,7 @@ class RagAgentPluginTest {
     void theSearchLimitInTheInstructionIsTheConfiguredOne() {
         ScriptedLlm llm = searchThenAnswer(ANSWER);
 
-        run(agent(llm, 5.0, new RagProperties(4, false, "")), "req-1");
+        run(agent(llm, 5.0, new RagProperties(4, false, "", false)), "req-1");
 
         String instruction = String.join("\n", llm.requests().get(0).getSystemInstructions());
         assertThat(instruction).contains("at most 4 calls").doesNotContain("at most 2 calls")
@@ -129,7 +228,7 @@ class RagAgentPluginTest {
         ScriptedLlm suffixed = searchThenAnswer(ANSWER);
 
         run(agent(plain, 5.0), "req-1");
-        run(agent(suffixed, 5.0, new RagProperties(2, true, "EXPERIMENT SUFFIX")), "req-2");
+        run(agent(suffixed, 5.0, new RagProperties(2, true, "EXPERIMENT SUFFIX", false)), "req-2");
 
         assertThat(String.join("\n", plain.requests().get(0).getSystemInstructions()))
                 .doesNotContain("EXPERIMENT SUFFIX");

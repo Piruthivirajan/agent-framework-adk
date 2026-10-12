@@ -67,10 +67,14 @@ class ChatServiceTest {
         final ChatService chat;
 
         Rig(DoubleUnaryOperator score, boolean ragIsFinalAnswer) {
+            this(score, ragIsFinalAnswer, RagProperties.defaults());
+        }
+
+        Rig(DoubleUnaryOperator score, boolean ragIsFinalAnswer, RagProperties ragProps) {
             SearchDocumentsTool tool = new SearchDocumentsTool(
                     TestRetrieval.service(TestRetrieval.sampleCandidates(), i -> score.applyAsDouble(i), null), ledger,
-                    RagProperties.defaults());
-            RagAgentPlugin plugin = new RagAgentPlugin(tool, RagProperties.defaults()) {
+                    ragProps);
+            RagAgentPlugin plugin = new RagAgentPlugin(tool, ragProps) {
                 @Override
                 public boolean finalAnswer() {
                     return ragIsFinalAnswer;
@@ -552,8 +556,24 @@ class ChatServiceTest {
     }
 
     @Test
-    void aTurnCannotCiteAnotherTurnsChunks() {
+    void withTheFirstSearchPrefetchedTheModelCannotSkipTheSearchSoItsRefsAreAlwaysThisTurnsOwn() {
         Rig rig = new Rig(i -> 5.0 - i, true);
+        rig.ragFinal.set(GOOD_ANSWER);
+        ChatResult first = rig.chat.chat("tab-1", "What is the AWS Well-Architected Tool?");
+        assertThat(first.grounded()).isTrue();
+
+        ChatResult second = rig.chat.chat("tab-1", "And again?");
+
+        // the search ran again in code; r1c1 now names a chunk of this request's own retrieval
+        assertThat(second.retrievals()).hasSize(1);
+        assertThat(second.requestId()).isNotEqualTo(first.requestId());
+        assertThat(second.grounded()).isTrue();
+    }
+
+    @Test
+    void aTurnCannotCiteAnotherTurnsChunks() {
+        // the model-first mode (prefetch off) is where a model could skip the search and reuse a ref
+        Rig rig = new Rig(i -> 5.0 - i, true, new RagProperties(2, true, "", false));
         rig.ragFinal.set(GOOD_ANSWER);
         ChatResult first = rig.chat.chat("tab-1", "What is the AWS Well-Architected Tool?");
         assertThat(first.grounded()).isTrue();

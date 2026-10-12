@@ -29,6 +29,12 @@
   #log { flex: 1; overflow-y: auto; padding: 16px; }
   .msg { max-width: 860px; margin: 0 auto 16px; }
   .bubble { padding: 10px 14px; border-radius: 12px; white-space: pre-wrap; overflow-wrap: anywhere; }
+  .answer-text { white-space: normal; }
+  .answer-text p { margin: 0 0 8px; }
+  .answer-text h3, .answer-text h4 { font-size: 15px; line-height: 1.35; margin: 14px 0 6px; }
+  .answer-text h4 { font-size: 14px; }
+  .answer-text ul { margin: 0 0 8px; padding-left: 1.2em; }
+  .answer-text li { margin: 2px 0; }
   .user .bubble { background: var(--user); margin-left: 15%; }
   .bot .bubble { background: var(--panel); border: 1px solid var(--line); }
   .label { display: inline-block; font-size: 12px; font-weight: 600; padding: 2px 8px; border-radius: 999px; background: var(--chip); color: var(--muted); margin-bottom: 6px; }
@@ -263,6 +269,49 @@
     notice: 'Notice'
   };
 
+  // Model text stays text. Headings, lists and bold are real elements; their words are text nodes.
+  function renderAnswer(text) {
+    var root = el('div', { class: 'answer-text' });
+    var list = null;
+    function endList() { list = null; }
+    function inline(parent, s) {
+      var re = /\*\*([^*]+)\*\*|\*([^*\n]+)\*/g;
+      var last = 0;
+      var m;
+      while ((m = re.exec(s))) {
+        if (m.index > last) parent.appendChild(document.createTextNode(s.slice(last, m.index)));
+        parent.appendChild(el(m[1] !== undefined ? 'strong' : 'em', { text: m[1] !== undefined ? m[1] : m[2] }));
+        last = m.index + m[0].length;
+      }
+      if (last < s.length) parent.appendChild(document.createTextNode(s.slice(last)));
+    }
+    String(text || '').replace(/\r\n/g, '\n').split('\n').forEach(function (line) {
+      var t = line.trim();
+      if (!t || /^(-{3,}|\*{3,})$/.test(t)) { endList(); return; }
+      var heading = /^(#{1,6})\s+(.*)$/.exec(t);
+      if (heading) {
+        endList();
+        var node = el(heading[1].length <= 2 ? 'h3' : 'h4');
+        inline(node, heading[2]);
+        root.appendChild(node);
+        return;
+      }
+      var item = /^[-*]\s+(.*)$/.exec(t);
+      if (item) {
+        if (!list) { list = el('ul'); root.appendChild(list); }
+        var li = el('li');
+        inline(li, item[1]);
+        list.appendChild(li);
+        return;
+      }
+      endList();
+      var p = el('p');
+      inline(p, t);
+      root.appendChild(p);
+    });
+    return root;
+  }
+
   function addAnswer(r) {
     var label = LABELS[r.kind] || r.kind;
     if (r.kind === 'summary' && r.file) label = 'Summary of ' + r.file.name + ' · not quote-checked';
@@ -272,7 +321,7 @@
       label = 'From tool ' + okCall.tool + ' on ' + okCall.serverName + ' · not checked against the documents';
     }
     var bubble = el('div', { class: 'bubble' }, [
-      el('span', { class: 'label ' + r.kind, text: label }), el('br'), document.createTextNode(r.answer)
+      el('span', { class: 'label ' + r.kind, text: label }), renderAnswer(r.answer)
     ]);
     var wrap = el('div', { class: 'msg bot' }, [bubble]);
     if (r.rewrittenQuestion) {

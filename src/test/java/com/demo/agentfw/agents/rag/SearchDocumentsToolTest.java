@@ -74,7 +74,7 @@ class SearchDocumentsToolTest {
         List<String> queries = new ArrayList<>();
         SearchDocumentsTool tool = new SearchDocumentsTool(
                 TestRetrieval.service(TestRetrieval.sampleCandidates(), i -> 5.0 - i, queries::add), ledger,
-                new RagProperties(2, false, ""));
+                new RagProperties(2, false, "", false));
 
         tool.search("req-1", "one");
         tool.search("req-1", "two");
@@ -92,7 +92,7 @@ class SearchDocumentsToolTest {
         RetrievalLedger ledger = new RetrievalLedger();
         SearchDocumentsTool tool = new SearchDocumentsTool(
                 TestRetrieval.service(TestRetrieval.sampleCandidates(), i -> 5.0 - i, null), ledger,
-                new RagProperties(1, false, ""));
+                new RagProperties(1, false, "", false));
 
         tool.search("req-1", "one");
 
@@ -106,7 +106,7 @@ class SearchDocumentsToolTest {
         List<String> queries = new ArrayList<>();
         SearchDocumentsTool tool = new SearchDocumentsTool(
                 TestRetrieval.service(TestRetrieval.sampleCandidates(), i -> -9.0, queries::add), ledger,
-                new RagProperties(3, true, ""));
+                new RagProperties(3, true, "", false));
 
         Map<String, Object> first = tool.search("req-1", "who won the world cup");
         Map<String, Object> second = tool.search("req-1", "world cup winner");
@@ -122,7 +122,7 @@ class SearchDocumentsToolTest {
         RetrievalLedger ledger = new RetrievalLedger();
         SearchDocumentsTool tool = new SearchDocumentsTool(
                 TestRetrieval.service(TestRetrieval.sampleCandidates(), i -> 5.0 - i, null), ledger,
-                new RagProperties(3, true, ""));
+                new RagProperties(3, true, "", false));
 
         tool.search("req-1", "one");
 
@@ -135,7 +135,7 @@ class SearchDocumentsToolTest {
         List<String> queries = new ArrayList<>();
         SearchDocumentsTool tool = new SearchDocumentsTool(
                 TestRetrieval.service(TestRetrieval.sampleCandidates(), i -> -9.0, queries::add), ledger,
-                new RagProperties(2, false, ""));
+                new RagProperties(2, false, "", false));
 
         Map<String, Object> first = tool.search("req-1", "one");
         tool.search("req-1", "two");

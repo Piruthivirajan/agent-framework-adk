@@ -8,6 +8,12 @@ import org.springframework.boot.context.properties.bind.DefaultValue;
  *                           reached" instead of a search. Enforced in code, not only in the prompt
  * @param stopAfterFloorMiss when the first search of a request is below the retrieval floor, refuse further
  *                           searches (nothing relevant exists, so rewriting only costs time)
+ * @param prefetchFirstSearch run the first search in code with the request text as the query, instead of
+ *                           spending a model call on "call searchDocuments with this query". The model
+ *                           still receives the results as a normal tool result and may search once more
+ *                           with another query (up to {@code maxSearches}). Saves one model call (about
+ *                           2 s) per question; the question as the query is what the retrieval
+ *                           evaluation measured (docs/CALIBRATION.md, docs/FUSION.md)
  * @param instructionSuffix  text appended to the agent's instruction; empty in production. It exists for the
  *                           adversarial experiment: a deliberately permissive suffix shows whether the
  *                           verifier, not the prompt, is what stops an answer from memory
@@ -16,7 +22,8 @@ import org.springframework.boot.context.properties.bind.DefaultValue;
 public record RagProperties(
         @DefaultValue("2") int maxSearches,
         @DefaultValue("true") boolean stopAfterFloorMiss,
-        @DefaultValue("") String instructionSuffix) {
+        @DefaultValue("") String instructionSuffix,
+        @DefaultValue("true") boolean prefetchFirstSearch) {
 
     public RagProperties {
         if (maxSearches < 1) {
@@ -26,6 +33,6 @@ public record RagProperties(
 
     /** The configured defaults, for code and tests that are not built by Spring. */
     public static RagProperties defaults() {
-        return new RagProperties(2, true, "");
+        return new RagProperties(2, true, "", true);
     }
 }
