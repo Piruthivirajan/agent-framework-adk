@@ -1,7 +1,9 @@
 package com.demo.agentfw.mcp;
 
 import java.net.URI;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.regex.Pattern;
 
@@ -74,6 +76,48 @@ public record McpServerConfig(String id, String name, String url, McpTransport t
         } catch (RuntimeException e) {
             return "(invalid url)";
         }
+    }
+
+    /**
+     * Every string that must never appear in a log, a trace, an error or an answer: the header values
+     * exactly as configured, the token part of a {@code Scheme token} value (a server that echoes only the
+     * token), and the query string, query values and user info of the URL.
+     */
+    public List<String> secretValues() {
+        List<String> out = new ArrayList<>();
+        for (String v : headers.values()) {
+            if (v == null) {
+                continue;
+            }
+            String value = v.strip();
+            out.add(value);
+            int space = value.indexOf(' ');
+            if (space > 0 && value.substring(0, space).matches("[A-Za-z][A-Za-z0-9_-]*")) {
+                out.add(value.substring(space + 1).strip());          // Bearer <token> -> <token>
+            }
+        }
+        try {
+            URI u = URI.create(url.strip());
+            if (u.getRawQuery() != null) {
+                out.add(u.getRawQuery());
+                for (String pair : u.getRawQuery().split("&")) {
+                    int eq = pair.indexOf('=');
+                    if (eq >= 0) {
+                        out.add(pair.substring(eq + 1));
+                    }
+                }
+            }
+            if (u.getRawUserInfo() != null) {
+                out.add(u.getRawUserInfo());
+                int colon = u.getRawUserInfo().indexOf(':');
+                if (colon >= 0) {
+                    out.add(u.getRawUserInfo().substring(colon + 1));
+                }
+            }
+        } catch (RuntimeException e) {
+            // an invalid URL has no parts to register; validation reports it to the user
+        }
+        return out;
     }
 
     @Override

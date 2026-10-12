@@ -1,5 +1,6 @@
 package com.demo.agentfw.mcp;
 
+import com.demo.agentfw.core.Secrets;
 import com.google.adk.tools.BaseTool;
 import com.google.adk.tools.mcp.McpToolset;
 import com.google.adk.tools.mcp.SseServerParameters;
@@ -129,12 +130,14 @@ public class McpRegistry implements DisposableBean {
             return new TestResult(false, List.of(), blocked.get());
         }
         Connected c = null;
+        Secrets.track(config, config.secretValues());
         try {
             c = connect(config);
             return new TestResult(true, infos(c.tools), null);
         } catch (McpConnectException e) {
             return new TestResult(false, List.of(), e.failure);
         } finally {
+            Secrets.untrack(config);
             if (c != null) {
                 close(c.toolset);
             }
@@ -155,6 +158,7 @@ public class McpRegistry implements DisposableBean {
                     input.headers(), input.enabled());
             store.save(e.config);        // first: if the database is down nothing has changed in memory
             servers.put(id, e);
+            trackSecrets();
             reconnect(e);
             publish();
             return view(e);
@@ -177,6 +181,7 @@ public class McpRegistry implements DisposableBean {
             requireAllowed(next);
             store.save(next);
             e.config = next;
+            trackSecrets();
             reconnect(e);
             publish();
             return view(e);
@@ -199,6 +204,7 @@ public class McpRegistry implements DisposableBean {
             store.delete(id);
             close(e.toolset);
             servers.remove(id);
+            trackSecrets();
             publish();
         }
     }
@@ -274,6 +280,7 @@ public class McpRegistry implements DisposableBean {
             unreadable = result.unreadable();
             loaded = true;
             loading = false;
+            trackSecrets();
         }
         log.info("restored {} saved MCP server(s), {} could not be read", restored.size(), result.unreadable());
         for (Entry e : restored) {
@@ -427,8 +434,15 @@ public class McpRegistry implements DisposableBean {
         try {
             toolset.close();
         } catch (RuntimeException e) {
-            log.debug("closing an mcp toolset failed: {}", e.toString());
+            log.debug("closing an mcp toolset failed: {}", Secrets.mask(e.toString()));
         }
+    }
+
+    /** Registers every configured credential with {@link Secrets}, so no log, trace, error or answer shows it. */
+    private void trackSecrets() {
+        List<String> values = new ArrayList<>();
+        servers.values().forEach(e -> values.addAll(e.config.secretValues()));
+        Secrets.track(this, values);
     }
 
     // ---- helpers ---------------------------------------------------------------------------------
@@ -452,7 +466,8 @@ public class McpRegistry implements DisposableBean {
         String status = !e.config.enabled() ? "DISABLED" : e.connecting ? "CONNECTING"
                 : e.error != null ? "ERROR" : "CONNECTED";
         return new ServerView(e.config.id(), e.config.name(), e.config.safeUrl(), e.config.transport(),
-                new ArrayList<>(e.config.headers().keySet()), e.config.enabled(), status, infos(e.tools), e.error,
+                new ArrayList<>(e.config.headers().keySet()), e.config.enabled(), status, infos(e.tools),
+                e.error == null ? null : new McpFailure(e.error.code(), Secrets.mask(e.error.message())),
                 e.checkedAt);
     }
 

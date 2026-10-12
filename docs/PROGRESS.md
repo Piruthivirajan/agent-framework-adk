@@ -113,6 +113,14 @@ Decisions (user): file agent shape decided by the step 0 spike; **two paths** to
 
 <!-- Newest first. One entry per task: date, what was built, what was verified. -->
 
+### 2026-10-12: hardening 4, every configured MCP credential redacted by exact value
+- Finding: only Google-key-shaped strings were masked. A server that echoed its `Authorization` header (or a model that repeated it) would have shown the token in the trace, the answer, an error and, worse, to the language model.
+- `Secrets` now also holds *tracked values*: `McpRegistry` registers, on every add/update/remove/restore, `McpServerConfig.secretValues()` = every header value exactly as configured, the token part of a `Scheme token` value (a server may echo just the token), and the URL's query string, query values and user info. `Secrets.mask` replaces them (longest first) in addition to the Google-key pattern; values under 4 characters are not registered (they would damage ordinary text). Owners are held weakly.
+- Applied where the credentials could travel: `RecordingMcpTool` masks the result *before it is recorded and before it is returned to the model* (`Secrets.maskDeep` over the nested map), the recorded arguments, and error text; `ChatService.mcpResult` masks the final sentence (the model may repeat an echoed value); `McpRegistry` masks failure messages in views and its debug log; the existing `Secrets.mask` call sites (`ErrorMapping.clean`, `GlobalExceptionHandler`, `ChatService` logs) get the tracked values for free. The test-connection button tracks the unsaved config's values while it runs.
+- Tests: `SecretsTest` (5), `McpAnswerPathTest.aCredentialTheServerEchoesBackNeverReachesTheTraceTheModelOrTheAnswer` (the demo server echoes an unknown order id, which here is the token: the trace, the answer and every tool result the model was shown are clean).
+- Consequence to know: a non-secret header such as `Accept: application/json` is also "a configured header value" and is masked wherever it appears. Exact match was the requirement; a header with a value under 4 characters is exempt.
+- Not covered: ADK's own debug logging of requests (off at the default log level), and values that a server transforms (base64, URL-encoding, truncation) before echoing.
+
 ### 2026-10-12: hardening 3, MCP servers persisted in MongoDB, encrypted
 - Finding: the registry was memory-only, so a redeploy on the VM emptied the MCP settings.
 - `McpConfigStore` (interface) with two implementations chosen in `McpStoreConfiguration`: `MongoMcpConfigStore` (collection `mcp_servers`) when `AGENTFW_MCP_SECRET_KEY` is a valid key, otherwise `MemoryOnlyMcpConfigStore`, which carries the sentence the settings page shows ("kept in memory only ... because no encryption key is configured", or "key is not valid"). Credentials are never written unencrypted: an invalid key does not fall back to plain text.

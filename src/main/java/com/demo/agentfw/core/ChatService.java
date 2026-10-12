@@ -348,6 +348,7 @@ public class ChatService {
             answer = text.isEmpty() || text.equals(McpAgentPlugin.NO_TOOL_FITS)
                     ? "The tool " + firstOk.tool() + " on " + firstOk.serverName() + " returned: " + firstOk.result()
                     : text;
+            answer = Secrets.mask(answer);       // the model's sentence may repeat a credential the server echoed
         }
         return new ChatResult(answer, McpAgentPlugin.NAME, false, List.of(), traces,
                 new ChatResult.Verification(List.of(), false), toolCalls, null, requestId, millisSince(start))

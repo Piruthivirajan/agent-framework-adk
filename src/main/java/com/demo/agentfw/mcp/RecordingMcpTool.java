@@ -1,5 +1,6 @@
 package com.demo.agentfw.mcp;
 
+import com.demo.agentfw.core.Secrets;
 import com.demo.agentfw.core.TurnState;
 import com.google.adk.tools.BaseTool;
 import com.google.adk.tools.ToolContext;
@@ -17,6 +18,10 @@ import java.util.Optional;
  * Wraps an MCP tool so that every call is recorded in the {@link McpCallLedger} and a failure becomes
  * a result the model can see instead of an exception that ends the turn. The wrapped tool still does
  * the call, with the credentials of its own connection; this class never sees them.
+ *
+ * <p>Nothing the server sends back is trusted not to contain the credentials it was given: a result and
+ * an error text are passed through {@link Secrets#mask} (which knows every configured header value)
+ * before they are recorded for the trace and before the model sees them.
  *
  * <p>The exposed name can differ from the server's tool name (a prefix is added when two servers have
  * a tool of the same name); the call goes to the server under its own name.
@@ -53,20 +58,27 @@ final class RecordingMcpTool extends BaseTool {
         Object id = toolContext.state().get(TurnState.REQUEST_ID);
         String requestId = id == null ? "" : id.toString();
         long start = System.nanoTime();
-        return delegate.runAsync(args, toolContext).map(result -> {
+        return delegate.runAsync(args, toolContext).map(raw -> {
+            Map<String, Object> result = masked(raw);
             boolean error = looksLikeError(result);
-            ledger.record(requestId, new McpCallLedger.Call(server.id(), server.name(), serverToolName, args,
-                    json(result), error, error ? errorText(result) : null, millis(start)));
+            ledger.record(requestId, new McpCallLedger.Call(server.id(), server.name(), serverToolName,
+                    masked(args), json(result), error, error ? errorText(result) : null, millis(start)));
             return result;
         }).onErrorReturn(e -> {
             McpFailure failure = McpFailure.classify(e, server.safeUrl());
+            String message = Secrets.mask(failure.message());
             log.warn("mcp tool {} on {} failed: {}", serverToolName, server.name(), failure.code());
-            ledger.record(requestId, new McpCallLedger.Call(server.id(), server.name(), serverToolName, args, "",
-                    true, failure.message(), millis(start)));
+            ledger.record(requestId, new McpCallLedger.Call(server.id(), server.name(), serverToolName,
+                    masked(args), "", true, message, millis(start)));
             Map<String, Object> out = new LinkedHashMap<>();
-            out.put("error", failure.message());
+            out.put("error", message);
             return out;
         });
+    }
+
+    @SuppressWarnings("unchecked")
+    private static Map<String, Object> masked(Map<String, Object> map) {
+        return map == null ? Map.of() : (Map<String, Object>) Secrets.maskDeep(map);
     }
 
     /** MCP reports a tool-level failure as {@code isError: true} in the result. */

@@ -73,6 +73,7 @@ class McpAnswerPathTest {
         final AtomicReference<String> mcpFinal = new AtomicReference<>(
                 "Order ORD-1001 has shipped with BlueFreight and is due on 2026-10-14.");
         final List<LlmRequest> coordinatorRequests = new java.util.concurrent.CopyOnWriteArrayList<>();
+        final List<LlmRequest> mcpAgentRequests = new java.util.concurrent.CopyOnWriteArrayList<>();
 
         Rig(boolean registerServer) {
             registry = new McpRegistry(e -> { }, mcpLedger);
@@ -126,6 +127,7 @@ class McpAnswerPathTest {
                         : ScriptedLlm.call("searchDocuments", Map.of("query", "orders"));
             }
             if (!req.tools().isEmpty()) {                                          // the MCP agent
+                mcpAgentRequests.add(req);
                 if (ScriptedLlm.hasToolResult(req)) {
                     return ScriptedLlm.text(mcpFinal.get());
                 }
@@ -276,6 +278,29 @@ class McpAnswerPathTest {
                 .flatMap(c -> c.parts().orElse(List.of()).stream()).map(p -> p.text().orElse(""))
                 .reduce("", (a, b) -> a + "\n" + b);
         assertThat(history).contains("A question of the second tab").doesNotContain("secret question");
+    }
+
+    @Test
+    void aCredentialTheServerEchoesBackNeverReachesTheTraceTheModelOrTheAnswer() {
+        Rig rig = new Rig(true);
+        // the demo server answers "No order with the id <id> exists.", so this id makes it echo the token
+        rig.mcpArgs.set(Map.of("order_id", TOKEN));
+        rig.mcpFinal.set("The server says there is no order with the id " + TOKEN + ".");   // the model repeats it
+
+        ChatResult r = rig.chat.chat("tab-1", "Where is order 12345?");
+
+        assertThat(r.answer()).doesNotContain(TOKEN).contains("no order with the id");
+        McpCallLedger.Call call = r.mcp().calls().get(0);
+        assertThat(call.result()).doesNotContain(TOKEN).contains("No order with the id ***");
+        assertThat(call.arguments().toString()).doesNotContain(TOKEN);
+        // what the language model was shown as the tool's result
+        String toolResultsSeenByModel = rig.mcpAgentRequests.stream()
+                .flatMap(req -> req.contents().stream())
+                .flatMap(c -> c.parts().orElse(List.of()).stream())
+                .flatMap(p -> p.functionResponse().stream())
+                .map(fr -> String.valueOf(fr.response().orElse(Map.of())))
+                .reduce("", String::concat);
+        assertThat(toolResultsSeenByModel).contains("No order with the id").doesNotContain(TOKEN);
     }
 
     @Test
