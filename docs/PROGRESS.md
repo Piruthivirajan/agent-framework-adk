@@ -113,6 +113,12 @@ Decisions (user): file agent shape decided by the step 0 spike; **two paths** to
 
 <!-- Newest first. One entry per task: date, what was built, what was verified. -->
 
+### 2026-10-13: the trace says where the seconds went
+- Request: the stage list only showed *start offsets* (+5.2 s Searching), which reads as "searching took 5 s". `ChatResult.timeline` (API `timeline`) is now a list of plain steps with start, duration and a note, and the chat page shows them under "How this answer was produced" as "Where the time went" (table with a bar scaled to the turn).
+- Sources of the numbers (no new measurement): the coordinator's share is the time to its first function-call event (`Event.timestamp`); the search row is the real trace (embedding, database search, rerank) and says when it overlapped the routing (`SpeculativeSearch.wasUsed`), in which case it added almost no waiting time; the answer is the model call between the search being ready and the quote check starting; the check is code. A file turn is one step named after the agent; a tool fallback adds "Trying the connected tools".
+- Example (live, "tell me about security", 7.1 s): choosing the agent 0.9 s; searching 2.3 s (embedding 1.0 s, database 27 ms, rerank 1.2 s) overlapped with it; writing the answer 4.8 s; checking 13 ms.
+- Tests: `ChatServiceTest` (document turn: four steps, numbers within the turn, search duration equals the trace; file turn: one step).
+
 ### 2026-10-13: offline top-K probe (how many passages should the model get)
 - `TopKProbeRunner` (`agentfw.topk-probe.run=true`, no model call: 32 query embeddings): reranks the first 12 fused candidates and counts how many in-corpus questions have an answer page among the first N reranked passages.
 - Result (strict / widened of 32): N=3 24/30, **N=5 (now) 26/31**, N=6 26/31, N=7 27/31, N=8 27/31, N=10 28/31, N=12 29/31. Going from 5 to 8 passages gains one strict question (in-06, an answer that continues over a page break) and no widened one; 60% more text goes to the model, which makes the answer slower and the grounding task harder. Not worth it; `final-top-n` stays 5.

@@ -36,13 +36,14 @@ public record ChatResponse(
         List<String> toolCalls,
         List<StageEvent> stages,
         ChatResult.McpAnswer mcp,
+        List<ChatResult.Segment> timeline,
         String requestId,
         long totalMillis) {
 
     public static ChatResponse from(ChatResult r) {
         return new ChatResponse(kind(r), r.answer(), r.route(), r.grounded(), r.sources(), r.file(),
                 r.rewrittenQuestion(), r.verification(), r.retrievals(), r.toolCalls(), r.stages(), r.mcp(),
-                r.requestId(), r.totalMillis());
+                r.timeline(), r.requestId(), r.totalMillis());
     }
 
     static String kind(ChatResult r) {

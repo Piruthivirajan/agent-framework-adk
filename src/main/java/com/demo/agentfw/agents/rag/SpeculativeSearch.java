@@ -39,6 +39,7 @@ public class SpeculativeSearch {
     private final RetrievalService retrieval;
     private final boolean enabled;
     private final Map<String, Pending> pending = new ConcurrentHashMap<>();
+    private final java.util.Set<String> used = ConcurrentHashMap.newKeySet();
     private final ExecutorService executor = Executors.newCachedThreadPool(r -> {
         Thread t = new Thread(r, "speculative-search");
         t.setDaemon(true);
@@ -72,14 +73,22 @@ public class SpeculativeSearch {
             return Optional.empty();
         }
         try {
-            return Optional.of(p.result().join());
+            RetrievalResult result = p.result().join();
+            used.add(requestId);
+            return Optional.of(result);
         } catch (RuntimeException e) {
             log.info("speculative search request={} not used: {}", requestId, e.getClass().getSimpleName());
             return Optional.empty();
         }
     }
 
+    /** True when the search of this request was the one started with the turn (it overlapped the routing). */
+    public boolean wasUsed(String requestId) {
+        return used.contains(requestId);
+    }
+
     public void clear(String requestId) {
         pending.remove(requestId);
+        used.remove(requestId);
     }
 }

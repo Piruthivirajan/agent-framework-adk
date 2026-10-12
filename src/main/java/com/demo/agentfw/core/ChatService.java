@@ -158,6 +158,7 @@ public class ChatService {
 
     private ChatResult run(String sessionId, String text, String fileId, Consumer<StageEvent> listener) {
         long start = System.nanoTime();
+        long startEpochMillis = System.currentTimeMillis();
         String requestId = UUID.randomUUID().toString();
         boolean attachment = fileId != null && !fileId.isBlank();
         progress.register(requestId, listener);
@@ -197,6 +198,8 @@ public class ChatService {
             }
             history.add(sessionId, text, result.answer());
             result = result.withStages(progress.snapshot(requestId));
+            result = result.withTimeline(timeline(events, startEpochMillis, result, attachment,
+                    speculative != null && speculative.wasUsed(requestId)));
             return effective.equals(text) ? result : result.withRewrittenQuestion(effective);
         } catch (ChatFailedException e) {
             throw e;
@@ -212,6 +215,78 @@ public class ChatService {
             mcpLedger.clear(requestId);
             progress.unregister(requestId);
         }
+    }
+
+    /**
+     * Where the seconds of the turn went, in steps a person can read. The coordinator's share is the time
+     * until its first function call event; a search started with the turn overlaps it and adds no waiting
+     * time; the answer is the model call between the search being ready and the verification starting; the
+     * check is code. The numbers come from event timestamps, the retrieval trace and the stage markers,
+     * not from extra measurement.
+     */
+    private static List<ChatResult.Segment> timeline(List<Event> events, long startEpochMillis, ChatResult r,
+                                                     boolean attachment, boolean searchOverlappedRouting) {
+        long total = r.totalMillis();
+        List<ChatResult.Segment> out = new ArrayList<>();
+        long cursor = 0;
+        long routingEnd = -1;
+        if (!attachment) {
+            for (Event e : events) {
+                if (!e.functionCalls().isEmpty()) {
+                    routingEnd = Math.max(0, Math.min(total, e.timestamp() - startEpochMillis));
+                    break;
+                }
+            }
+        }
+        if (routingEnd >= 0) {
+            out.add(new ChatResult.Segment("Choosing the agent", 0, routingEnd,
+                    "the coordinator model reads the question and picks the agent"));
+            cursor = routingEnd;
+        }
+        long searchesEnd = cursor;
+        List<com.demo.agentfw.retrieval.RetrievalTrace> traces = r.retrievals();
+        for (int i = 0; i < traces.size(); i++) {
+            var t = traces.get(i);
+            long mongo = t.search().stageMillis().values().stream().mapToLong(Long::longValue).sum();
+            boolean overlapped = i == 0 && searchOverlappedRouting;
+            long from = overlapped ? 0 : searchesEnd;
+            String note = "embedding " + t.embedMillis() + " ms, database search " + mongo + " ms, rerank "
+                    + t.rerank().millis() + " ms"
+                    + (overlapped ? "; started with the question, while the coordinator was choosing, so it added "
+                            + "almost no waiting time" : "");
+            out.add(new ChatResult.Segment(traces.size() > 1 ? "Searching the documents (search " + (i + 1) + ")"
+                    : "Searching the documents", from, t.totalMillis(), note));
+            searchesEnd = Math.max(searchesEnd, from + t.totalMillis());
+        }
+        long verifyStart = total;
+        long toolsStart = -1;
+        boolean verified = false;
+        for (StageEvent s : r.stages()) {
+            if ("verifying".equals(s.stage())) {
+                verifyStart = Math.min(total, s.elapsedMillis());
+                verified = true;
+            }
+            if ("tools".equals(s.stage())) {
+                toolsStart = Math.min(total, s.elapsedMillis());
+            }
+        }
+        if (RagAgentPlugin.NAME.equals(r.route()) || !traces.isEmpty()) {
+            long answerEnd = toolsStart >= 0 ? Math.min(toolsStart, verifyStart) : verifyStart;
+            out.add(new ChatResult.Segment("Writing the answer", searchesEnd, Math.max(0, answerEnd - searchesEnd),
+                    "the model writes the claims, each with a quote, from the passages it was given"));
+            if (verified && (toolsStart < 0 || verifyStart <= toolsStart)) {
+                long checkEnd = toolsStart >= 0 ? toolsStart : total;
+                out.add(new ChatResult.Segment("Checking every quote", verifyStart, Math.max(0, checkEnd - verifyStart),
+                        "code only: each quote must appear word for word in the passage it cites"));
+            }
+            if (toolsStart >= 0) {
+                out.add(new ChatResult.Segment("Trying the connected tools", toolsStart, total - toolsStart,
+                        "the documents had no answer we could stand behind"));
+            }
+        } else {
+            out.add(new ChatResult.Segment("Running " + r.route(), cursor, Math.max(0, total - cursor), ""));
+        }
+        return out;
     }
 
     private ChatResult decide(List<Event> events, String requestId, long start, boolean attachment, String text) {

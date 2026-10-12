@@ -571,6 +571,35 @@ class ChatServiceTest {
     }
 
     @Test
+    void aDocumentTurnExplainsWhereItsTimeWentInPlainSteps() {
+        Rig rig = new Rig(i -> 5.0 - i, true);
+        rig.ragFinal.set(GOOD_ANSWER);
+
+        ChatResult r = rig.chat.chat("tab-1", "What is the AWS Well-Architected Tool?");
+
+        assertThat(r.timeline()).extracting(ChatResult.Segment::label).containsExactly(
+                "Choosing the agent", "Searching the documents", "Writing the answer", "Checking every quote");
+        for (ChatResult.Segment s : r.timeline()) {
+            assertThat(s.startMillis()).isBetween(0L, r.totalMillis());
+            assertThat(s.durationMillis()).isBetween(0L, r.totalMillis());
+            assertThat(s.note()).isNotBlank();
+        }
+        ChatResult.Segment search = r.timeline().get(1);
+        assertThat(search.note()).contains("embedding").contains("rerank");     // the real numbers of the trace
+        assertThat(search.durationMillis()).isEqualTo(r.retrievals().get(0).totalMillis());
+    }
+
+    @Test
+    void aFileTurnHasASingleStepNamedAfterTheAgent() {
+        Rig rig = new Rig(i -> 5.0 - i, true);
+        UploadedFile upload = rig.uploads.upload("tab-1", "notes.txt", NOTES);
+
+        ChatResult r = rig.chat.chat("tab-1", "Summarize my file", upload.id());
+
+        assertThat(r.timeline()).extracting(ChatResult.Segment::label).containsExactly("Running file_agent");
+    }
+
+    @Test
     void aTurnCannotCiteAnotherTurnsChunks() {
         // the model-first mode (prefetch off) is where a model could skip the search and reuse a ref
         Rig rig = new Rig(i -> 5.0 - i, true, new RagProperties(2, true, "", false));

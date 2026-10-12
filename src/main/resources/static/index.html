@@ -357,6 +357,7 @@
     if (r.verification && r.verification.problems && r.verification.problems.length) {
       body.appendChild(el('div', { class: 'kv' }, [el('span', { text: 'checks: ' + r.verification.problems.join('; ') })]));
     }
+    if (r.timeline && r.timeline.length) body.appendChild(timelineBlock(r));
     if (r.stages && r.stages.length) {
       var ul = el('ul', { class: 'stages' });
       r.stages.forEach(function (s) {
@@ -383,6 +384,28 @@
       });
     }
     return el('details', null, [el('summary', { text: 'How this answer was produced' }), body]);
+  }
+
+  // Where the seconds went: one row per step with its start, its duration and a bar scaled to the turn.
+  function timelineBlock(r) {
+    var total = Math.max(1, r.totalMillis);
+    var table = el('table');
+    table.appendChild(el('thead', null, [el('tr', null, ['step', 'starts', 'takes', '', 'what happens'].map(function (h) { return el('th', { text: h }); }))]));
+    var tb = el('tbody');
+    r.timeline.forEach(function (s) {
+      var left = Math.min(100, (s.startMillis / total) * 100);
+      var width = Math.max(1, Math.min(100 - left, (s.durationMillis / total) * 100));
+      var track = el('div', { style: 'position:relative;height:10px;min-width:120px;background:var(--chip);border-radius:3px' },
+        [el('div', { style: 'position:absolute;top:0;height:10px;border-radius:3px;background:var(--accent);left:' + left.toFixed(1) + '%;width:' + width.toFixed(1) + '%' })]);
+      tb.appendChild(el('tr', null, [
+        el('td', { text: s.label }), el('td', { text: '+' + ms(s.startMillis) }), el('td', { text: ms(s.durationMillis) }),
+        el('td', null, [track]), el('td', { text: s.note || '' })
+      ]));
+    });
+    tb.appendChild(el('tr', null, [el('td', { text: 'Whole turn' }), el('td', { text: '' }), el('td', { text: ms(r.totalMillis) }),
+      el('td', null, []), el('td', { text: 'steps can overlap, so the rows add up to more than the turn' })]));
+    table.appendChild(tb);
+    return el('div', null, [el('div', { class: 'where', style: 'font-weight:600;margin-top:8px', text: 'Where the time went' }), table]);
   }
 
   function retrievalBlock(t, n) {

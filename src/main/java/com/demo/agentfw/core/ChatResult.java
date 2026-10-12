@@ -27,6 +27,8 @@ import java.util.List;
  * @param stages      when each stage of the turn started (routing, searching, reranking, ...), in order
  * @param mcp         set when connected MCP tools were called in this turn: which server and tool, with what
  *                    arguments, and the raw result; the answer is then not checked against the documents
+ * @param timeline    where the time of the turn went, as segments with a start and a duration (plain language
+ *                    steps, not stage markers); empty when it could not be worked out
  */
 public record ChatResult(
         String answer,
@@ -42,10 +44,29 @@ public record ChatResult(
         FileSummary file,
         String rewrittenQuestion,
         List<StageEvent> stages,
-        McpAnswer mcp) {
+        McpAnswer mcp,
+        List<Segment> timeline) {
 
     public ChatResult {
         stages = stages == null ? List.of() : List.copyOf(stages);
+        timeline = timeline == null ? List.of() : List.copyOf(timeline);
+    }
+
+    /** One step of the turn: when it started (ms from the start of the turn), how long it took, and a note. */
+    public record Segment(String label, long startMillis, long durationMillis, String note) {
+    }
+
+    public ChatResult(String answer, String route, boolean grounded, List<GroundingVerifier.Source> sources,
+                      List<RetrievalTrace> retrievals, Verification verification, List<String> toolCalls,
+                      String modelOutput, String requestId, long totalMillis, FileSummary file,
+                      String rewrittenQuestion, List<StageEvent> stages, McpAnswer mcp) {
+        this(answer, route, grounded, sources, retrievals, verification, toolCalls, modelOutput, requestId,
+                totalMillis, file, rewrittenQuestion, stages, mcp, null);
+    }
+
+    public ChatResult withTimeline(List<Segment> segments) {
+        return new ChatResult(answer, route, grounded, sources, retrievals, verification, toolCalls, modelOutput,
+                requestId, totalMillis, file, rewrittenQuestion, stages, mcp, segments);
     }
 
     public ChatResult(String answer, String route, boolean grounded, List<GroundingVerifier.Source> sources,
@@ -65,7 +86,7 @@ public record ChatResult(
 
     public ChatResult withMcp(McpAnswer answerFromTools) {
         return new ChatResult(answer, route, grounded, sources, retrievals, verification, toolCalls, modelOutput,
-                requestId, totalMillis, file, rewrittenQuestion, stages, answerFromTools);
+                requestId, totalMillis, file, rewrittenQuestion, stages, answerFromTools, timeline);
     }
 
     public ChatResult(String answer, String route, boolean grounded, List<GroundingVerifier.Source> sources,
@@ -93,17 +114,17 @@ public record ChatResult(
 
     public ChatResult withRewrittenQuestion(String rewritten) {
         return new ChatResult(answer, route, grounded, sources, retrievals, verification, toolCalls, modelOutput,
-                requestId, totalMillis, file, rewritten, stages, mcp);
+                requestId, totalMillis, file, rewritten, stages, mcp, timeline);
     }
 
     public ChatResult withVerification(Verification v) {
         return new ChatResult(answer, route, grounded, sources, retrievals, v, toolCalls, modelOutput,
-                requestId, totalMillis, file, rewrittenQuestion, stages, mcp);
+                requestId, totalMillis, file, rewrittenQuestion, stages, mcp, timeline);
     }
 
     public ChatResult withStages(List<StageEvent> timeline) {
         return new ChatResult(answer, route, grounded, sources, retrievals, verification, toolCalls, modelOutput,
-                requestId, totalMillis, file, rewrittenQuestion, timeline, mcp);
+                requestId, totalMillis, file, rewrittenQuestion, timeline, mcp, this.timeline);
     }
 
     /** What the file agent summarized and how, for the "summary of file X" label and the trace panel. */
