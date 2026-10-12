@@ -113,6 +113,12 @@ Decisions (user): file agent shape decided by the step 0 spike; **two paths** to
 
 <!-- Newest first. One entry per task: date, what was built, what was verified. -->
 
+### 2026-10-13: offline top-K probe (how many passages should the model get)
+- `TopKProbeRunner` (`agentfw.topk-probe.run=true`, no model call: 32 query embeddings): reranks the first 12 fused candidates and counts how many in-corpus questions have an answer page among the first N reranked passages.
+- Result (strict / widened of 32): N=3 24/30, **N=5 (now) 26/31**, N=6 26/31, N=7 27/31, N=8 27/31, N=10 28/31, N=12 29/31. Going from 5 to 8 passages gains one strict question (in-06, an answer that continues over a page break) and no widened one; 60% more text goes to the model, which makes the answer slower and the grounding task harder. Not worth it; `final-top-n` stays 5.
+- The misses are not about N: in-21 (never retrieved, widened or not), in-11 and in-32 (answer page not in the fused top 20 as the strict page; a widened page is found at N=3), in-31 (fused rank 14, found only at N=10), in-10 (rerank position 9 to 12). Parent-child chunking would help at most in-06. What would help in-21/32/31 is query expansion (one more model call), not done for latency.
+- Also: 32/32 is not a goal worth chasing on this set: the floor was chosen on these questions. Reported honestly: strict 26/31, widened 30 to 31 of 32, adversarial out-of-corpus 100% refused.
+
 ### 2026-10-12: latency, a small model for the coordinator
 - Real per-call numbers first: `LimitedLlm` logged the end of the response stream, which for the coordinator includes the whole nested turn. It now logs `model_ms` (until the answer arrived) and `stream_ms`. With that: coordinator 3.3 to 5.2 s, answer 3.0 to 3.5 s, search 1.5 s (hidden behind the coordinator). Thinking budget 128 vs 0 made no difference (3.1 to 4.4 s): the call is slow because the model is, not because it thinks.
 - Models listed with the key's own `models` endpoint (names not guessed), the coordinator-shaped call benchmarked 4 times each: gemini-3.8-flash median 3.8 s (one call took 19 s), gemini-3.5-flash-lite 1.1 s, gemini-3.1-flash-lite 1.1 s, gemini-flash-lite-latest 1.5 s; gemini-2.5-flash-lite is not available (404).
