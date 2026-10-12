@@ -492,7 +492,35 @@ class ChatServiceTest {
     }
 
     @Test
-    void anotherAgentsAnswerFailsClosedUntilItHasItsOwnVerificationPath() {
+    void anotherAgentsAnswerReachesTheUserAsThatAgentsUnverifiedText() {
+        ChatResult r = askProseAgent("Lambda allows 1,000 concurrent executions, unverified.");
+
+        assertThat(r.answer()).isEqualTo("Lambda allows 1,000 concurrent executions, unverified.");
+        assertThat(r.route()).isEqualTo("prose_agent");
+        assertThat(r.grounded()).isFalse();
+        assertThat(r.sources()).isEmpty();
+        assertThat(r.verification().problems()).isEmpty();
+        assertThat(r.toolCalls()).containsExactly("prose_agent");
+    }
+
+    @Test
+    void anotherAgentThatReturnsNothingFailsClosed() {
+        ChatResult r = askProseAgent("  ");
+
+        assertThat(r.answer()).isEqualTo("Not found in the reference documents.");
+        assertThat(r.route()).isEqualTo("prose_agent");
+        assertThat(r.grounded()).isFalse();
+        assertThat(r.verification().problems().get(0)).contains("returned no answer text");
+    }
+
+    @Test
+    void anotherAgentsTextIsMaskedLikeEveryOtherAnswer() {
+        ChatResult r = askProseAgent("The key is AIzaSyA1234567890abcdefghijklmnopqrstuv1 for you.");
+
+        assertThat(r.answer()).doesNotContain("AIzaSyA1234567890abcdefghijklmnopqrstuv1");
+    }
+
+    private ChatResult askProseAgent(String agentText) {
         ScriptedLlm llm = new ScriptedLlm();
         RetrievalLedger ledger = new RetrievalLedger();
         RagAgentPlugin rag = new RagAgentPlugin(new SearchDocumentsTool(
@@ -518,15 +546,9 @@ class ChatServiceTest {
                 new FollowUpRewriter((system, user) -> user), ChatProperties.defaults());
         llm.script(req -> req.tools().containsKey("prose_agent")
                 ? ScriptedLlm.call("prose_agent", Map.of("request", "q"))      // the coordinator picks the other agent
-                : ScriptedLlm.text("Lambda allows 1,000 concurrent executions, unverified."));
+                : ScriptedLlm.text(agentText));
 
-        ChatResult r = chat.chat("tab-1", "What is the Lambda limit?");
-
-        assertThat(r.answer()).isEqualTo("Not found in the reference documents.");
-        assertThat(r.answer()).doesNotContain("unverified");
-        assertThat(r.route()).isEqualTo("prose_agent");
-        assertThat(r.grounded()).isFalse();
-        assertThat(r.verification().problems().get(0)).contains("no verification path yet");
+        return chat.chat("tab-1", "What is the Lambda limit?");
     }
 
     @Test

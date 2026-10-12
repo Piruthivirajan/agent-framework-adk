@@ -68,6 +68,10 @@ agentfw:
     # Hosts that may be used as MCP server addresses although they are on a private or local network
     # (the demo MCP server). Everything private, loopback or link-local is refused otherwise (SSRF guard).
     allowed-hosts: ${AGENTFW_MCP_ALLOWED_HOSTS:}
+  sample-agent:
+    # The sample third agent (ClockAgentPlugin). Off by default; set AGENTFW_SAMPLE_AGENT=true to enable it
+    # for the "one new class" demo. Nothing else changes: the coordinator picks it up from the registry.
+    enabled: ${AGENTFW_SAMPLE_AGENT:false}
   auth:
     # The demo login. Empty = the application is open (fine on a laptop, not on a reachable host).
     password: ${AGENTFW_DEMO_PASSWORD:}

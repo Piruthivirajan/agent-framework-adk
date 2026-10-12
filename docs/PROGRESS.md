@@ -113,6 +113,12 @@ Decisions (user): file agent shape decided by the step 0 spike; **two paths** to
 
 <!-- Newest first. One entry per task: date, what was built, what was verified. -->
 
+### 2026-10-12: hardening 1, a generic answer path for any other agent (+ sample third agent)
+- Source: the interviewer-style review. Finding: `ChatService.decide` replaced every non-rag/file/mcp agent's output with the fixed NOT_FOUND ("no verification path yet"), so a third agent was routable but mute.
+- Now: the last function response of any agent other than rag/file/mcp is shown as that agent's text (`Secrets.mask`ed), `route` = the agent name, `grounded=false`, no sources, and the API `kind` is `agent_answer`. The chat page labels it "From agent <name> · not verified against the documents". An agent that returns blank text still fails closed to NOT_FOUND with the reason in the trace. The file agent is excluded (its result comes from `FileSummaryLedger`).
+- `ClockAgentPlugin` (`clock_agent`, tells the current date/time in a zone) is the sample third agent: one class, `@ConditionalOnProperty agentfw.sample-agent.enabled`, off by default; enable with `AGENTFW_SAMPLE_AGENT=true` and restart. Nothing else is edited.
+- Tests: `ChatServiceTest` (answer reaches the user unverified, blank output fails closed, key-like text masked), `ClockAgentPluginTest` (off by default, flag enables it, zone handling, `kind`). Replaces the old test that asserted the fixed NOT_FOUND.
+
 ### 2026-10-11: one-click Windows launchers
 - `start-demo.bat` (checks Java, Docker running and a real `GOOGLE_API_KEY` in `.env`; starts MongoDB and waits for healthy; downloads the corpus if `corpus\*.pdf` is missing; starts the demo MCP server in its own minimized window; starts the application in its own window with `AGENTFW_MCP_ALLOWED_HOSTS=localhost` and `AGENTFW_INGESTION_ON_STARTUP=true`; waits for `/actuator/health`; opens the browser and prints the demo MCP URL and header), `stop-demo.bat`, `run-tests.bat`, `check-demo.bat`. ASCII with CRLF (`.gitattributes`: `*.bat text eol=crlf`). `NO_BROWSER=1` and `NO_PAUSE=1` switch off the browser and the final pause for scripted use.
 - **Not executed by me:** a launch opens console windows on the desktop and the run was declined, so these four files were reviewed by reading (escaping of pipes and parentheses in `for /f`, label loops without delayed expansion) and not run. The commands inside them are the ones verified by hand in the earlier steps.

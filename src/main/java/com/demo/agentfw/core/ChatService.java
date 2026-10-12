@@ -206,6 +206,8 @@ public class ChatService {
         java.util.concurrent.atomic.AtomicReference<String> routedRequest = new java.util.concurrent.atomic.AtomicReference<>();
         Optional<String> ragOutput = Optional.empty();
         Optional<String> mcpOutput = Optional.empty();
+        String otherAgent = null;                     // the last agent besides rag/file/mcp that answered, and its text
+        String otherOutput = null;
         for (Event event : events) {
             event.functionCalls().forEach(fc -> {
                 fc.name().ifPresent(toolCalls::add);
@@ -214,11 +216,14 @@ public class ChatService {
                 }
             });
             for (FunctionResponse response : event.functionResponses()) {
-                if (RagAgentPlugin.NAME.equals(response.name().orElse(""))) {
+                String responder = response.name().orElse("");
+                if (RagAgentPlugin.NAME.equals(responder)) {
                     ragOutput = Optional.of(resultText(response));
-                }
-                if (McpAgentPlugin.NAME.equals(response.name().orElse(""))) {
+                } else if (McpAgentPlugin.NAME.equals(responder)) {
                     mcpOutput = Optional.of(resultText(response));
+                } else if (!FileAgentPlugin.NAME.equals(responder) && !responder.isBlank()) {
+                    otherAgent = responder;
+                    otherOutput = resultText(response);
                 }
             }
         }
@@ -257,10 +262,17 @@ public class ChatService {
             result = new ChatResult(NO_TOOL_REPLY, "none", false, List.of(), traces,
                     new ChatResult.Verification(List.of("no tool was called, so any answer would come from the model's "
                             + "own knowledge"), false), toolCalls, null, requestId, millisSince(start));
+        } else if (otherAgent != null && otherOutput != null && !otherOutput.isBlank()) {
+            // any other pluggable agent: its text is shown as that agent's answer, labelled by the UI as not
+            // verified against the documents (kind agent_answer). It is never presented as a cited answer.
+            result = new ChatResult(Secrets.mask(otherOutput.strip()), otherAgent, false, List.of(), traces,
+                    new ChatResult.Verification(List.of(), false), toolCalls, null, requestId, millisSince(start));
         } else {
-            result = new ChatResult(GroundingVerifier.NOT_FOUND, toolCalls.get(0), false, List.of(), traces,
-                    new ChatResult.Verification(List.of("the answer of tool '" + toolCalls.get(0)
-                            + "' has no verification path yet"), false), toolCalls, null, requestId, millisSince(start));
+            // an agent was called but returned nothing usable: fail closed, with the reason in the trace
+            String agent = toolCalls.get(0);
+            result = new ChatResult(GroundingVerifier.NOT_FOUND, agent, false, List.of(), traces,
+                    new ChatResult.Verification(List.of("the agent '" + agent + "' returned no answer text"), false),
+                    toolCalls, null, requestId, millisSince(start));
         }
         String routed = routedRequest.get();
         if (!attachment && routed != null && !routed.isBlank() && !routed.strip().equals(text.strip())) {

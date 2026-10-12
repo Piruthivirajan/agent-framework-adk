@@ -1,6 +1,9 @@
 package com.demo.agentfw.api;
 
+import com.demo.agentfw.agents.file.FileAgentPlugin;
+import com.demo.agentfw.agents.mcp.McpAgentPlugin;
 import com.demo.agentfw.agents.rag.GroundingVerifier;
+import com.demo.agentfw.agents.rag.RagAgentPlugin;
 import com.demo.agentfw.core.ChatResult;
 import com.demo.agentfw.core.StageEvent;
 import com.demo.agentfw.retrieval.RetrievalTrace;
@@ -15,7 +18,9 @@ import java.util.List;
  * @param kind {@code answer} (verified, cited), {@code tool_answer} (from a connected MCP tool, with the
  *             raw result in {@code mcp}; not checked against the documents), {@code tool_error} (the tool
  *             reported an error), {@code summary} (file summary, not quote-verified),
- *             {@code not_found} (the question is not answered by the documents), {@code notice} (a message
+ *             {@code agent_answer} (an agent added as a plugin; shown as that agent's text, not verified
+ *             against the documents), {@code not_found} (the question is not answered by the documents),
+ *             {@code notice} (a message
  *             from the system, for example "no file uploaded" or "no route")
  */
 public record ChatResponse(
@@ -50,9 +55,19 @@ public record ChatResponse(
         if (r.grounded()) {
             return "answer";
         }
+        if (isOtherAgent(r.route()) && r.verification().problems().isEmpty()) {
+            return "agent_answer";
+        }
         if (r.answer() != null && r.answer().startsWith(GroundingVerifier.NOT_FOUND)) {
             return "not_found";
         }
         return "notice";
+    }
+
+    /** A route that is none of the built-in agents: an agent added as a plugin. */
+    private static boolean isOtherAgent(String route) {
+        return route != null && !route.isBlank() && !"none".equals(route)
+                && !RagAgentPlugin.NAME.equals(route) && !FileAgentPlugin.NAME.equals(route)
+                && !McpAgentPlugin.NAME.equals(route);
     }
 }
