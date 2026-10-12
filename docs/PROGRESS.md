@@ -113,6 +113,11 @@ Decisions (user): file agent shape decided by the step 0 spike; **two paths** to
 
 <!-- Newest first. One entry per task: date, what was built, what was verified. -->
 
+### 2026-10-12: hardening round finished (steps 1 to 7)
+- `./mvnw -o verify`: 411 tests, 0 failures (372 before). **Skipped because Docker Desktop was not running:** `MongoMcpConfigStoreTest` (3), `MongoChunkStoreTest`, `AtlasChunkSearchTest`, `MongoUploadStoreTest`. The encrypted-at-rest assertions on a real MongoDB document are therefore still to be run (`docker compose up -d`, then `./mvnw test -Dtest=MongoMcpConfigStoreTest`).
+- Not run live (needs the Gemini key and the stack): the 10-case routing check and the MCP check against the changed fallback and limits; and nothing was run on the VM (iptables rule, key generation in `deploy.sh`, `--restore-db` with the new collection).
+- Remaining limitations are listed in README "Known limitations"; the ones this round added or left open: one AES key and no rotation; global secret tracking masks any configured header value everywhere (including `Accept: application/json`); ADK sessions are in memory and unbounded; the MongoDB driver's 30 s server-selection wait; no OCR; 500-page PDFs need `agentfw.files.max-chars` raised; SSRF is application-level plus the metadata rule only.
+
 ### 2026-10-12: hardening 7, egress rule for the cloud metadata address
 - `scripts/block-metadata.sh`: `iptables -I DOCKER-USER 1 -d 169.254.169.254 -j DROP`, idempotent (`-C` first), waits for Docker to create the chain, `--dry-run`, `--install-service` writes and enables `agentfw-block-metadata.service` (`After/Requires/PartOf=docker.service`, oneshot, re-applies at boot and on Docker restarts). `deploy.sh` runs it before the build (`--no-metadata-block` skips it) and warns instead of failing if iptables is missing.
 - Why below the application: `McpUrlGuard` checks the address when a server is saved and connected; a name that resolves differently later, or a redirect, is outside it. A rule in `DOCKER-USER` (Docker's own hook for user rules, evaluated first and never overwritten) stops the packets of every container, and does not affect the host.
