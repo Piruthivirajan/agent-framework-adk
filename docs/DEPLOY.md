@@ -71,7 +71,9 @@ seconds while Caddy obtains the certificate.
 What `deploy.sh` does, in order: install Docker and the compose plugin if missing; create `.env` and fill
 `DOMAIN` (from the public IP) and `APP_UID`/`APP_GID`; stop if `GOOGLE_API_KEY`, `AGENTFW_DEMO_PASSWORD`
 or `ACME_EMAIL` is empty; download the 10 corpus PDFs and verify their sha256; allow only 22, 80 and 443
-in `ufw`; `docker compose up -d --build` (the image build downloads the cross-encoder model and fails on a
+in `ufw`; add an iptables rule that drops container traffic to the cloud metadata address
+`169.254.169.254` and a systemd unit that re-adds it at boot (`scripts/block-metadata.sh`, skip with
+`--no-metadata-block`); `docker compose up -d --build` (the image build downloads the cross-encoder model and fails on a
 sha256 mismatch); wait for the application's health check; wait for "Ingestion finished" in the log.
 
 ### After the deployment: the checks to do (and to write down for the README)
@@ -108,6 +110,13 @@ knowledge base" live in `./corpus` on the host (back that folder up) and in the 
 - Cookies are `Secure`, `HttpOnly`, `SameSite=Lax`; Caddy adds HSTS and a content security policy.
 - The MCP URL guard refuses private, loopback and link-local addresses (cloud metadata included) unless a
   host is listed in `AGENTFW_MCP_ALLOWED_HOSTS` (the compose demo profile sets `demo-mcp`).
+- **Egress rule for the metadata address.** `deploy.sh` adds `iptables -I DOCKER-USER 1 -d 169.254.169.254
+  -j DROP` (idempotent; the unit `agentfw-block-metadata.service` re-applies it at boot and when Docker
+  restarts). It sits below the application, so a DNS name that changes after the URL check, or a redirect,
+  still cannot reach the metadata service from a container. Check it on the VM (the answer must be a
+  timeout, not credentials): `docker run --rm curlimages/curl -m 3 -sS http://169.254.169.254/`. Not
+  covered: other private ranges (the application refuses those, but an egress rule for them would also cut
+  the demo MCP server), and IPv6 metadata endpoints.
 - Secrets are in `.env` (mode 600, not in git) and in the container environment; they are not in the image.
 - sslip.io is a public service that maps a name to an IP; the certificate is issued for that name by a
   public CA. If the shared-domain rate limits of Let's Encrypt are hit, Caddy falls back to ZeroSSL; with

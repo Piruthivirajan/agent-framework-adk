@@ -206,7 +206,14 @@ characters.
   The default limit is 1,000,000 characters.
 - **MCP:** configuration is lost on restart unless `AGENTFW_MCP_SECRET_KEY` is set (then it is stored encrypted
   in MongoDB; a lost or changed key makes the saved servers unreadable); stdio servers are not supported; the SSRF guard checks the
-  address at save and connect time but cannot prevent DNS rebinding between its check and the SDK's connect.
+  address at save and connect time but cannot prevent DNS rebinding between its check and the SDK's connect;
+  `scripts/deploy.sh` therefore also drops container traffic to the metadata address 169.254.169.254 with an
+  iptables rule (not checked on a VM yet), but the other private ranges are guarded by the application only.
+- **Third agent:** any agent plugin's answer is shown as that agent's text and labelled "not verified against
+  the documents"; only the RAG, file and MCP agents have their own verification or call records.
+- **Failures:** a Gemini call has a 60 s timeout and one retry on 429/503; a MongoDB outage costs the user up to
+  30 s (the driver's server-selection timeout) before the message appears; ADK sessions are in memory and are
+  not evicted.
 - **One shared password**, one role, no per-user data separation. Chat history is in memory (per browser tab).
 - **One VM, no high availability**; the demo is single-tenant.
 - Language: documents and prompts are English; other languages were not tested.
@@ -251,6 +258,9 @@ Main settings (all in `src/main/resources/application.yml`, environment names in
 | `agentfw.retrieval.min-rerank-score` | -6.5 | retrieval floor |
 | `agentfw.files.max-chars` | 1,000,000 | largest file text to summarize |
 | `AGENTFW_MCP_ALLOWED_HOSTS` | empty | hosts exempt from the SSRF guard (demo server) |
+| `AGENTFW_MCP_SECRET_KEY` | empty | base64 of 32 random bytes; saves MCP servers encrypted in MongoDB |
+| `AGENTFW_SAMPLE_AGENT` | false | enables the sample `clock_agent` (a third agent, one class) |
+| `agentfw.llm.request-timeout-seconds` / `retries` | 60 / 1 | Gemini call timeout, retries on 429/503 |
 | `AGENTFW_INGESTION_ON_STARTUP` | false | ingest `./corpus` at start (idempotent) |
 
 Security properties worth knowing: credentials of MCP servers are masked in UI and API, never logged and

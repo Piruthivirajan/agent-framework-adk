@@ -98,6 +98,7 @@ tool calls. It deletes the servers it created.
 - The server URL is fetched by the application. An **SSRF guard** refuses addresses that resolve to a
   private, loopback or link-local network (the cloud metadata address included) unless the host is listed in
   `AGENTFW_MCP_ALLOWED_HOSTS` (that is why the demo needs it: `localhost` on a laptop, `demo-mcp` in Docker
-  Compose). Not covered: DNS rebinding between the check and the connection; use an egress rule for that.
+  Compose). Not covered by the guard: DNS rebinding between the check and the connection. For the metadata
+  address the deployment adds an egress rule (`scripts/block-metadata.sh`, installed by `deploy.sh`).
 - Tool answers are written by the model from the tool result and are **not** verified the way document
   answers are; the raw result is always shown next to the answer.

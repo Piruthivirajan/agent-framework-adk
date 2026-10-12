@@ -9,6 +9,8 @@
 #
 # Options:  --demo               also start the demo MCP server (scenario D)
 #           --no-firewall        do not touch ufw
+#           --no-metadata-block  do not add the iptables rule that drops container traffic to the cloud
+#                                metadata address 169.254.169.254 (scripts/block-metadata.sh)
 #           --restore-db FILE    restore the chunks (with their embeddings) from an archive made by
 #                                scripts/dump-db.sh instead of embedding the corpus here: no Gemini
 #                                quota is needed at deploy time. Without it, normal ingestion runs.
@@ -19,11 +21,13 @@ cd "$(dirname "$0")/.."
 COMPOSE=(docker compose -f docker-compose.prod.yml)
 WITH_DEMO=false
 FIREWALL=true
-RESTORE_DB=""
+METADATA_BLOCK=true
+RESTORE_DB=""""
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --demo) WITH_DEMO=true ;;
     --no-firewall) FIREWALL=false ;;
+    --no-metadata-block) METADATA_BLOCK=false ;;
     --restore-db)
       [[ $# -ge 2 ]] || { echo "--restore-db needs a file" >&2; exit 2; }
       RESTORE_DB="$2"; shift ;;
@@ -137,6 +141,19 @@ if $FIREWALL && command -v ufw >/dev/null 2>&1; then
   $SUDO ufw --force enable >/dev/null
   # Docker publishes ports by editing iptables itself, bypassing ufw: that is why docker-compose.prod.yml
   # publishes nothing except Caddy's 80 and 443.
+fi
+
+# ---- 4a. egress: containers must not reach the cloud metadata address --------------------------------
+# The application refuses such MCP URLs, but a DNS name that changes after the check, or a redirect, is
+# beyond a check in the application. The rule sits below it, in Docker's DOCKER-USER chain.
+if $METADATA_BLOCK; then
+  say "Egress rule: drop container traffic to the cloud metadata address 169.254.169.254"
+  if command -v iptables >/dev/null 2>&1; then
+    $SUDO bash scripts/block-metadata.sh --install-service \
+      || echo "WARNING: the metadata egress rule could not be installed; see scripts/block-metadata.sh" >&2
+  else
+    echo "WARNING: iptables is not installed, the metadata egress rule was NOT added" >&2
+  fi
 fi
 
 # ---- 4b. restore the database (optional) ------------------------------------------------------------
