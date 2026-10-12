@@ -50,6 +50,12 @@ class McpController {
         return registry.list();
     }
 
+    /** Whether saved servers survive a restart, and why not when they do not. Never any credential. */
+    @GetMapping("/storage")
+    McpRegistry.StorageInfo storage() {
+        return registry.storage();
+    }
+
     @PostMapping
     @ResponseStatus(HttpStatus.CREATED)
     McpRegistry.ServerView add(@RequestBody ServerRequest request) {

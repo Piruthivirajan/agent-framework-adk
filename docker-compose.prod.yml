@@ -41,6 +41,7 @@ services:
       AGENTFW_COOKIE_SECURE: "true"             # served over https by Caddy
       AGENTFW_FORWARD_HEADERS: native           # the login lockout counts the real client address
       AGENTFW_MCP_ALLOWED_HOSTS: ${AGENTFW_MCP_ALLOWED_HOSTS:-}
+      AGENTFW_MCP_SECRET_KEY: ${AGENTFW_MCP_SECRET_KEY:-}   # empty: MCP servers are not persisted
     volumes:
       - ./corpus:/app/corpus
     expose:

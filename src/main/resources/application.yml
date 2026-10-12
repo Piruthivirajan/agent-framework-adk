@@ -68,6 +68,10 @@ agentfw:
     # Hosts that may be used as MCP server addresses although they are on a private or local network
     # (the demo MCP server). Everything private, loopback or link-local is refused otherwise (SSRF guard).
     allowed-hosts: ${AGENTFW_MCP_ALLOWED_HOSTS:}
+    # base64 of 32 random bytes (openssl rand -base64 32). With it, configured MCP servers are saved in
+    # MongoDB with the address and header values AES-GCM encrypted and are loaded again at startup.
+    # Without it they stay in memory only and a restart forgets them (the settings page says so).
+    secret-key: ${AGENTFW_MCP_SECRET_KEY:}
   sample-agent:
     # The sample third agent (ClockAgentPlugin). Off by default; set AGENTFW_SAMPLE_AGENT=true to enable it
     # for the "one new class" demo. Nothing else changes: the coordinator picks it up from the registry.

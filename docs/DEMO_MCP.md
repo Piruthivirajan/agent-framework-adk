@@ -47,8 +47,9 @@ Open **MCP settings** (side panel of the chat page, or `http://localhost:8080/mc
 4. **Save server**. The tools are available to the assistant at the very next message: no restart.
 
 The header value is not shown again anywhere; the server list shows the header name and
-"values hidden". Credentials are kept in the application's memory only and are lost on restart
-(the page says so).
+"values hidden". With `AGENTFW_MCP_SECRET_KEY` set (`scripts/deploy.sh` generates one) the server is saved
+in MongoDB with its address and header values encrypted and is connected again after a restart; without it
+the credentials are kept in memory only and are lost on restart (the page says which of the two applies).
 
 ## 3. Ask questions
 
@@ -91,8 +92,9 @@ tool calls. It deletes the servers it created.
 ## Limits to know
 
 - **stdio is not supported**, by design: a hosted application cannot run a user-supplied command.
-- Configuration is **in memory only**, not persisted and not encrypted (production next step: persist it
-  encrypted with a key from the environment).
+- Configuration is persisted **only with `AGENTFW_MCP_SECRET_KEY`** (AES-GCM, one key from the environment;
+  a key that is lost or changed leaves the saved servers unreadable, they are not deleted). Without the key
+  it is in memory only and a restart forgets it.
 - The server URL is fetched by the application. An **SSRF guard** refuses addresses that resolve to a
   private, loopback or link-local network (the cloud metadata address included) unless the host is listed in
   `AGENTFW_MCP_ALLOWED_HOSTS` (that is why the demo needs it: `localhost` on a laptop, `demo-mcp` in Docker

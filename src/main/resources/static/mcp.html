@@ -33,7 +33,7 @@
   .note { color: var(--muted); font-size: 13px; }
   .notice { border-left: 3px solid var(--warn); padding: 6px 10px; background: var(--chip); border-radius: 4px; font-size: 13px; margin: 8px 0; }
   .chip { display: inline-block; font-size: 12px; font-weight: 600; padding: 2px 8px; border-radius: 999px; background: var(--chip); }
-  .CONNECTED { color: var(--ok); } .ERROR { color: var(--bad); } .DISABLED { color: var(--muted); }
+  .CONNECTED { color: var(--ok); } .ERROR { color: var(--bad); } .DISABLED, .CONNECTING { color: var(--muted); }
   .result { margin-top: 10px; padding: 8px 10px; border-radius: 8px; border: 1px solid var(--line); font-size: 14px; white-space: pre-wrap; overflow-wrap: anywhere; }
   .result.ok { border-color: var(--ok); } .result.bad { border-color: var(--bad); color: var(--bad); }
   ul.tools { margin: 6px 0 0; padding-left: 18px; font-size: 13px; }
@@ -60,8 +60,8 @@
       <strong>Not supported: stdio</strong> servers (started as a local command), because a hosted application cannot run commands for you.</div>
     <div class="notice"><strong>Addresses:</strong> only public servers can be connected. Addresses on a private network,
       this machine, or a link-local range (such as the cloud metadata address) are refused unless the administrator has allowed that host name.</div>
-    <div class="notice"><strong>Credentials:</strong> kept in the memory of the running application only, shown here by header name only, never written to disk or to the log, and never sent to the language model.
-      They are lost when the application restarts.</div>
+    <div class="notice" id="storage"><strong>Credentials:</strong> shown here by header name only, never written to the log, and never sent to the language model.
+      <span id="storageNote">Checking where they are kept…</span></div>
   </div>
 
   <div class="card" id="servers"><h2>Configured servers</h2><div id="list" aria-live="polite"><p class="note">Loading…</p></div></div>
@@ -222,8 +222,27 @@
   });
 
   // ---- the list --------------------------------------------------------------------------------
+  function loadStorage() {
+    api('GET', '/api/mcp/storage').then(function (st) {
+      var note = st.note;
+      if (st.unreadable > 0) {
+        note += ' ' + st.unreadable + ' saved server(s) could not be decrypted with the current key and are not shown; they are left unchanged in the database.';
+      }
+      $('storageNote').textContent = note;
+    }).catch(function () { $('storageNote').textContent = ''; });
+  }
+
+  var reloadTimer = null;
   function load() {
-    api('GET', '/api/mcp/servers').then(render).catch(function (e) {
+    clearTimeout(reloadTimer);
+    api('GET', '/api/mcp/servers').then(function (servers) {
+      render(servers);
+      loadStorage();
+      // servers loaded from the database connect in the background: look again until they have
+      if (servers.some(function (s) { return s.status === 'CONNECTING'; })) {
+        reloadTimer = setTimeout(load, 2500);
+      }
+    }).catch(function (e) {
       $('list').textContent = '';
       $('list').appendChild(el('p', { class: 'result bad', text: e.message }));
     });
@@ -243,7 +262,7 @@
     var card = el('div', { class: 'card', style: 'margin-bottom:12px' });
     card.appendChild(el('div', { class: 'server-head' }, [
       el('strong', { text: s.name }),
-      el('span', { class: 'chip ' + s.status, text: { CONNECTED: 'Connected', ERROR: 'Problem', DISABLED: 'Disabled' }[s.status] || s.status }),
+      el('span', { class: 'chip ' + s.status, text: { CONNECTED: 'Connected', ERROR: 'Problem', DISABLED: 'Disabled', CONNECTING: 'Connecting…' }[s.status] || s.status }),
       el('span', { class: 'note', text: (s.transport === 'SSE' ? 'SSE' : 'Streamable HTTP') + ' · ' + s.url })
     ]));
     card.appendChild(el('div', { class: 'note', text: 'Credentials: ' + (s.headerNames.length ? s.headerNames.join(', ') + ' (values hidden)' : 'none') }));

@@ -29,11 +29,13 @@ import java.util.concurrent.TimeoutException;
 /**
  * The MCP servers the user configured in the settings page, and their loaded tools.
  *
- * <p><b>In memory only.</b> Nothing is written to the database or to a file, nothing is encrypted:
- * configuration is lost when the application restarts. That is a demo trade-off, stated in the UI; the
- * credentials therefore exist in exactly one place, this map, and the views returned by this class
- * contain header names but never values. Credentials are never logged ({@link McpServerConfig#toString}
- * hides them and failure messages are composed from a fixed vocabulary).
+ * <p><b>Persistence.</b> The working copy is this map. With an encryption key configured, every change is
+ * also written to MongoDB through {@link McpConfigStore} (address and header values encrypted) and the
+ * saved servers are loaded and connected again at startup, in the background. Without a key nothing is
+ * written anywhere and a restart forgets the servers; {@link #storage()} says which of the two it is, for
+ * the settings page. The views returned by this class contain header names but never values, and
+ * credentials are never logged ({@link McpServerConfig#toString} hides them and failure messages are
+ * composed from a fixed vocabulary).
  *
  * <p>Tools are loaded when a server is saved or tested, and a {@link McpConfigChanged} event makes the
  * coordinator rebuild with the new tools on its next request: no restart.
@@ -53,6 +55,10 @@ public class McpRegistry implements DisposableBean {
     public record TestResult(boolean ok, List<ToolInfo> tools, McpFailure error) {
     }
 
+    /** Where saved servers live, for the settings page. {@code unreadable}: saved but not decryptable here. */
+    public record StorageInfo(boolean persistent, String note, int unreadable, boolean loaded) {
+    }
+
     /** What the API shows for a server. {@code headerNames}, never values. */
     public record ServerView(String id, String name, String url, McpTransport transport, List<String> headerNames,
                              boolean enabled, String status, List<ToolInfo> tools, McpFailure error,
@@ -65,6 +71,7 @@ public class McpRegistry implements DisposableBean {
         List<BaseTool> tools = List.of();
         McpFailure error;
         Instant checkedAt;
+        boolean connecting;         // loaded from the database, not connected yet
     }
 
     static final Duration CONNECT_TIMEOUT = Duration.ofSeconds(10);
@@ -74,16 +81,27 @@ public class McpRegistry implements DisposableBean {
     private final ApplicationEventPublisher events;
     private final McpCallLedger ledger;
     private final McpUrlGuard guard;
+    private final McpConfigStore store;
     private final Map<String, Entry> servers = new LinkedHashMap<>();
+    private boolean loaded;         // saved servers were read from the store (guarded by servers)
+    private boolean loading;        // a restore is running (guarded by servers)
+    private int unreadable;         // saved servers this key cannot decrypt (guarded by servers)
 
     @org.springframework.beans.factory.annotation.Autowired
-    public McpRegistry(ApplicationEventPublisher events, McpCallLedger ledger, McpUrlGuard guard) {
+    public McpRegistry(ApplicationEventPublisher events, McpCallLedger ledger, McpUrlGuard guard,
+                       McpConfigStore store) {
         this.events = events;
         this.ledger = ledger;
         this.guard = guard;
+        this.store = store;
     }
 
-    /** Without the address guard (tests that connect to a server on localhost). */
+    /** Memory only, with a given guard (tests). */
+    public McpRegistry(ApplicationEventPublisher events, McpCallLedger ledger, McpUrlGuard guard) {
+        this(events, ledger, guard, new MemoryOnlyMcpConfigStore());
+    }
+
+    /** Without the address guard and memory only (tests that connect to a server on localhost). */
     public McpRegistry(ApplicationEventPublisher events, McpCallLedger ledger) {
         this(events, ledger, McpUrlGuard.allowAll());
     }
@@ -135,6 +153,7 @@ public class McpRegistry implements DisposableBean {
             Entry e = new Entry();
             e.config = new McpServerConfig(id, input.name().strip(), input.url().strip(), input.transport(),
                     input.headers(), input.enabled());
+            store.save(e.config);        // first: if the database is down nothing has changed in memory
             servers.put(id, e);
             reconnect(e);
             publish();
@@ -156,6 +175,7 @@ public class McpRegistry implements DisposableBean {
                     headers == null ? old.headers() : headers, enabled == null ? old.enabled() : enabled);
             next.validate();
             requireAllowed(next);
+            store.save(next);
             e.config = next;
             reconnect(e);
             publish();
@@ -176,6 +196,7 @@ public class McpRegistry implements DisposableBean {
     public void remove(String id) {
         synchronized (servers) {
             Entry e = require(id);
+            store.delete(id);
             close(e.toolset);
             servers.remove(id);
             publish();
@@ -183,10 +204,87 @@ public class McpRegistry implements DisposableBean {
     }
 
     public List<ServerView> list() {
+        restoreInBackgroundIfNeeded();
         synchronized (servers) {
             List<ServerView> out = new ArrayList<>();
             servers.values().forEach(e -> out.add(view(e)));
             return out;
+        }
+    }
+
+    public StorageInfo storage() {
+        synchronized (servers) {
+            return new StorageInfo(store.persistent(), store.note(), unreadable, loaded || !store.persistent());
+        }
+    }
+
+    // ---- saved servers at startup -----------------------------------------------------------------
+
+    /** Once the application is up: read the saved servers and connect them without delaying startup. */
+    @org.springframework.context.event.EventListener(org.springframework.boot.context.event.ApplicationReadyEvent.class)
+    public void onApplicationReady() {
+        restoreInBackgroundIfNeeded();
+    }
+
+    private void restoreInBackgroundIfNeeded() {
+        synchronized (servers) {
+            if (!store.persistent() || loaded || loading) {
+                return;
+            }
+        }
+        Thread t = new Thread(this::restoreSaved, "mcp-restore");
+        t.setDaemon(true);
+        t.start();
+    }
+
+    /**
+     * Loads the saved servers from the store and connects the enabled ones. Does nothing when there is no
+     * persistence, or when it has been done. A database that is not reachable is logged and retried the
+     * next time the settings page asks for the list.
+     */
+    public void restoreSaved() {
+        synchronized (servers) {
+            if (!store.persistent() || loaded || loading) {
+                return;
+            }
+            loading = true;
+        }
+        McpConfigStore.LoadResult result;
+        try {
+            result = store.loadAll();
+        } catch (RuntimeException ex) {
+            log.warn("saved MCP servers could not be loaded now ({}); will retry", ex.getClass().getSimpleName());
+            synchronized (servers) {
+                loading = false;
+            }
+            return;
+        }
+        List<Entry> restored = new ArrayList<>();
+        synchronized (servers) {
+            for (McpServerConfig c : result.configs()) {
+                if (servers.containsKey(c.id()) || servers.size() >= MAX_SERVERS) {
+                    continue;
+                }
+                Entry e = new Entry();
+                e.config = c;
+                e.connecting = c.enabled();
+                servers.put(c.id(), e);
+                restored.add(e);
+            }
+            unreadable = result.unreadable();
+            loaded = true;
+            loading = false;
+        }
+        log.info("restored {} saved MCP server(s), {} could not be read", restored.size(), result.unreadable());
+        for (Entry e : restored) {
+            synchronized (servers) {
+                if (servers.get(e.config.id()) == e) {      // not deleted in the meantime
+                    reconnect(e);
+                }
+            }
+        }
+        if (!restored.isEmpty()) {
+            publish();
         }
     }
 
@@ -255,6 +353,7 @@ public class McpRegistry implements DisposableBean {
     }
 
     private void reconnect(Entry e) {
+        e.connecting = false;
         close(e.toolset);
         e.toolset = null;
         e.tools = List.of();
@@ -350,7 +449,8 @@ public class McpRegistry implements DisposableBean {
     }
 
     private ServerView view(Entry e) {
-        String status = !e.config.enabled() ? "DISABLED" : e.error != null ? "ERROR" : "CONNECTED";
+        String status = !e.config.enabled() ? "DISABLED" : e.connecting ? "CONNECTING"
+                : e.error != null ? "ERROR" : "CONNECTED";
         return new ServerView(e.config.id(), e.config.name(), e.config.safeUrl(), e.config.transport(),
                 new ArrayList<>(e.config.headers().keySet()), e.config.enabled(), status, infos(e.tools), e.error,
                 e.checkedAt);

@@ -103,6 +103,13 @@ if $WITH_DEMO; then
   if [[ -z "$(env_get AGENTFW_MCP_ALLOWED_HOSTS)" ]]; then env_set AGENTFW_MCP_ALLOWED_HOSTS demo-mcp; fi
 fi
 
+# encrypts the MCP credentials saved from the settings page (so they survive a restart). Generated once and
+# kept in .env: a different key cannot read what an older one wrote.
+if [[ -z "$(env_get AGENTFW_MCP_SECRET_KEY)" ]]; then
+  env_set AGENTFW_MCP_SECRET_KEY "$(head -c 32 /dev/urandom | base64 -w0)"
+  say "AGENTFW_MCP_SECRET_KEY generated in .env (keep it: saved MCP servers are encrypted with it)"
+fi
+
 missing=()
 for key in GOOGLE_API_KEY AGENTFW_DEMO_PASSWORD ACME_EMAIL; do
   value="$(env_get "$key")"

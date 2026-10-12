@@ -93,7 +93,7 @@ sha256 mismatch); wait for the application's health check; wait for "Ingestion f
 
 ```bash
 docker compose -f docker-compose.prod.yml logs -f app        # application log (no secrets in it)
-docker compose -f docker-compose.prod.yml restart app        # MCP configuration is in memory: it is lost
+docker compose -f docker-compose.prod.yml restart app        # saved MCP servers are reloaded (key in .env)
 git pull && bash scripts/deploy.sh                           # update: rebuild and restart what changed
 docker compose -f docker-compose.prod.yml down               # stop; volumes (database, certificates) stay
 docker compose -f docker-compose.prod.yml down -v            # stop and WIPE the database and certificates

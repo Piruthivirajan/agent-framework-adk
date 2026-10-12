@@ -116,7 +116,7 @@ decided in code, never from the coordinator's prose:
 | `retrieval` | hybrid search (3 fusion strategies), cross-encoder (DJL + ONNX Runtime), grounding gate, trace |
 | `ingestion` | PDF loader, chunker, embeddings, idempotent ingestion job, "add to knowledge base" |
 | `files` | Tika extraction, uploads (TTL), map-reduce summarizer |
-| `mcp` | registry (in memory), pre-flight probe, SSRF guard, call ledger |
+| `mcp` | registry, encrypted config store, pre-flight probe, SSRF guard, call ledger |
 | `api`, `auth` | controllers, error mapping, SSE, demo login |
 | `eval` | calibration and end-to-end runners and reports |
 
@@ -137,7 +137,7 @@ decided in code, never from the coordinator's prose:
 | **Search cap and early stop enforced in code** | rewriting a query rarely rescued a question and cost about 4 s per extra search | same-hour before/after: median 12.7 s → 9.1 s (Day 4 latency step) |
 | **Follow-ups are restated by the coordinator itself** | a separate rewrite call cost 2.5 to 4.5 s per turn; the coordinator already sees the history | live routing check 10 of 10 |
 | **"RAG not found → MCP" is orchestrated in `ChatService`** | a RAG answer ends the coordinator's turn (`finalAnswer`), so the model cannot chain a second tool | Day 6 step 2 |
-| **MCP configuration in memory only, masked, never logged** | no credential store means no credential-store risk in a demo; stated in the UI | Day 6 steps 1, 5 |
+| **MCP configuration encrypted at rest (AES-GCM, key from the environment), masked, never logged** | credentials must survive a restart without ever being stored readable; without a key the app stays memory-only and says so in the UI | hardening step 3, `McpSecretCipherTest` |
 | **SSRF guard on MCP URLs** | the app fetches user-supplied URLs from inside its network; the cloud metadata address must not be reachable | `McpUrlGuardTest` |
 | **Stage events over SSE; the answer is not streamed token by token** | the median turn is about 9 s, a silent 9 s looks broken; but an unverified answer must not be shown | Day 5 step 6 |
 
@@ -204,7 +204,8 @@ characters.
 - **Scanned PDFs are not supported** (no OCR): rejected with a clear message.
 - **Summaries of very large files are slow** (4 minutes for a 1,003-page PDF) and run inside the request.
   The default limit is 1,000,000 characters.
-- **MCP:** configuration is lost on restart; stdio servers are not supported; the SSRF guard checks the
+- **MCP:** configuration is lost on restart unless `AGENTFW_MCP_SECRET_KEY` is set (then it is stored encrypted
+  in MongoDB; a lost or changed key makes the saved servers unreadable); stdio servers are not supported; the SSRF guard checks the
   address at save and connect time but cannot prevent DNS rebinding between its check and the SDK's connect.
 - **One shared password**, one role, no per-user data separation. Chat history is in memory (per browser tab).
 - **One VM, no high availability**; the demo is single-tenant.
@@ -212,8 +213,9 @@ characters.
 
 ## Production next steps
 
-1. **MCP configuration persistence with encryption** (envelope encryption, key from a secrets manager),
-   per-user ownership, and an egress allow-list at the network level instead of address checks.
+1. **MCP configuration**: envelope encryption with a key from a secrets manager (today: one AES key from the
+   environment), key rotation, per-user ownership, and an egress allow-list at the network level instead of
+   address checks.
 2. **Asynchronous jobs** for large summaries and ingestion (a job queue with status polling), so the
    request does not hold a connection for minutes and work survives a restart.
 3. **Larger summaries**: hierarchical map-reduce with a cache of part summaries; investigate the
