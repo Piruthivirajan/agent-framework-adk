@@ -45,6 +45,14 @@ public class SearchDocumentsTool {
         this.progress = progress;
     }
 
+    private SpeculativeSearch speculative;
+
+    /** Optional: when present, a search that was started with the turn is used instead of a new one. */
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    public void setSpeculativeSearch(SpeculativeSearch speculative) {
+        this.speculative = speculative;
+    }
+
     /** Without progress reporting (tests that do not care about stages). */
     public SearchDocumentsTool(RetrievalService retrieval, RetrievalLedger ledger, RagProperties props) {
         this(retrieval, ledger, props, new TurnProgress());
@@ -86,7 +94,15 @@ public class SearchDocumentsTool {
         }
         RetrievalResult result;
         try {
-            result = retrieval.retrieve(query, stage -> progress.emit(requestId, stage, ""));
+            java.util.Optional<RetrievalResult> early = speculative == null ? java.util.Optional.empty()
+                    : speculative.take(requestId, query);
+            if (early.isPresent()) {
+                result = early.get();
+                progress.emit(requestId, "searching", "");        // the work is done; show the stages in order
+                progress.emit(requestId, "reranking", "");
+            } else {
+                result = retrieval.retrieve(query, stage -> progress.emit(requestId, stage, ""));
+            }
         } catch (RuntimeException e) {
             // never let this look like "the documents have no answer": the chat service reads the ledger
             ledger.recordFailure(requestId, e);

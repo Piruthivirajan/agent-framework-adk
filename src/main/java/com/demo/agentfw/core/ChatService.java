@@ -64,6 +64,13 @@ public class ChatService {
     private final McpCallLedger mcpLedger;
     private final McpRegistry mcp;
     private final Object[] sessionLocks = newLocks(64);
+    private com.demo.agentfw.agents.rag.SpeculativeSearch speculative;
+
+    /** Optional: starts the search of a text turn while the coordinator routes it. */
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    public void setSpeculativeSearch(com.demo.agentfw.agents.rag.SpeculativeSearch speculative) {
+        this.speculative = speculative;
+    }
 
     @org.springframework.beans.factory.annotation.Autowired
     public ChatService(CoordinatorFactory coordinators, RetrievalLedger ledger, GroundingVerifier verifier,
@@ -176,6 +183,9 @@ public class ChatService {
             }
             if (!attachment) {
                 progress.emit(requestId, "routing", "");
+                if (speculative != null) {
+                    speculative.start(requestId, effective);        // overlaps the coordinator's model call
+                }
             }
             List<Event> events = runner.runAsync(USER_ID, sessionId, Content.fromParts(Part.fromText(effective)),
                             coordinators.runConfig(), state)
@@ -194,6 +204,9 @@ public class ChatService {
             log.error("chat request={} failed: {}", requestId, Secrets.mask(e.toString()));
             throw new ChatFailedException("The model could not complete the request: " + e.getMessage(), e);
         } finally {
+            if (speculative != null) {
+                speculative.clear(requestId);
+            }
             ledger.clear(requestId);
             fileLedger.clear(requestId);
             mcpLedger.clear(requestId);

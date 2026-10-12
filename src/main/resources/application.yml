@@ -89,6 +89,7 @@ agentfw:
   rag:
     max-searches: 2              # enforced in the search tool, not only in the prompt (docs/e2e/findings.md, section 7)
     stop-after-floor-miss: true  # a first search below the floor ends the turn: rewriting did not rescue any question
+    speculative-search: true      # start the search while the coordinator routes (used when it passes the text on unchanged)
     prefetch-first-search: true   # the first search runs in code with the question as the query: one model call fewer (about 2 s)
     # instruction-suffix: unset in production; the adversarial experiment sets it
   retrieval:
