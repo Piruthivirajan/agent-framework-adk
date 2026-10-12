@@ -1,9 +1,14 @@
 package com.demo.agentfw.core;
 
+import com.google.adk.agents.BaseAgent;
 import com.google.adk.agents.LlmAgent;
 import com.google.adk.agents.RunConfig;
 import com.google.adk.models.BaseLlm;
-import com.google.adk.runner.InMemoryRunner;
+import com.google.adk.artifacts.InMemoryArtifactService;
+import com.google.adk.memory.InMemoryMemoryService;
+import com.google.adk.runner.Runner;
+import com.google.adk.sessions.BaseSessionService;
+import com.google.adk.sessions.InMemorySessionService;
 import com.google.genai.types.GenerateContentConfig;
 import com.google.genai.types.ThinkingConfig;
 import org.springframework.stereotype.Component;
@@ -19,6 +24,11 @@ import java.util.Map;
  *
  * <p>The runner is built on first use, so the application starts without a model key, and
  * {@link #invalidate()} makes the next request rebuild it (the hook for runtime tool changes).
+ *
+ * <p>All runners share one session service, so a rebuild changes the tools and not the conversation:
+ * a session keeps its history across {@code invalidate()}. A session is keyed by application name, user
+ * and session id, and the application name of a runner is the name of its root agent, which is the same
+ * before and after a rebuild.
  */
 @Component
 public class CoordinatorFactory {
@@ -28,8 +38,9 @@ public class CoordinatorFactory {
     private final AgentRegistry registry;
     private final ModelFactory models;
     private final LlmProperties props;
-    private InMemoryRunner runner;
-    private final Map<String, InMemoryRunner> agentRunners = new HashMap<>();
+    private final BaseSessionService sessions = new InMemorySessionService();
+    private Runner runner;
+    private final Map<String, Runner> agentRunners = new HashMap<>();
 
     public CoordinatorFactory(AgentRegistry registry, ModelFactory models, LlmProperties props) {
         this.registry = registry;
@@ -37,26 +48,34 @@ public class CoordinatorFactory {
         this.props = props;
     }
 
-    public synchronized InMemoryRunner runner() {
+    public synchronized Runner runner() {
         if (runner == null) {
-            runner = new InMemoryRunner(build());
+            runner = newRunner(build());
         }
         return runner;
+    }
+
+    /** A runner on the shared session service (what {@code InMemoryRunner} does, except the shared part). */
+    private Runner newRunner(BaseAgent root) {
+        return new Runner(root, root.name(), new InMemoryArtifactService(), sessions, new InMemoryMemoryService());
     }
 
     /**
      * A runner whose root is one plugin's agent, for the code rule that sends an attachment straight to
      * the file agent without a coordinator model call.
      */
-    public synchronized InMemoryRunner agentRunner(String pluginName) {
+    public synchronized Runner agentRunner(String pluginName) {
         return agentRunners.computeIfAbsent(pluginName, name -> {
             AgentPlugin plugin = registry.plugins().stream().filter(p -> p.name().equals(name)).findFirst()
                     .orElseThrow(() -> new IllegalStateException("No agent plugin named '" + name + "'"));
-            return new InMemoryRunner(plugin.build(agentContext()));
+            return newRunner(plugin.build(agentContext()));
         });
     }
 
-    /** The MCP configuration changed: the next request builds the coordinator with the new tools. */
+    /**
+     * The MCP configuration changed: the next request builds the coordinator with the new tools. The
+     * sessions are kept (see the class comment), so a follow-up after the change still has its context.
+     */
     @org.springframework.context.event.EventListener(com.demo.agentfw.mcp.McpRegistry.McpConfigChanged.class)
     public synchronized void invalidate() {
         runner = null;

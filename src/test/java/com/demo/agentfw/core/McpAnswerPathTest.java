@@ -246,6 +246,39 @@ class McpAnswerPathTest {
     }
 
     @Test
+    void theConversationSurvivesAddingAServerBecauseTheSessionsAreKeptAcrossTheRebuild() {
+        Rig rig = new Rig(false);
+        rig.coordinatorTool.set("rag_agent");
+        rig.chat.chat("tab-1", "What is the AWS Well-Architected Tool?");
+
+        rig.connect();                                         // the coordinator is rebuilt with the new tools
+        rig.chat.chat("tab-1", "and who is its audience?");
+
+        LlmRequest afterRebuild = rig.coordinatorRequests.get(rig.coordinatorRequests.size() - 1);
+        assertThat(afterRebuild.tools()).containsKey("mcp_agent");               // really the rebuilt coordinator
+        String history = afterRebuild.contents().stream()
+                .flatMap(c -> c.parts().orElse(List.of()).stream()).map(p -> p.text().orElse(""))
+                .reduce("", (a, b) -> a + "\n" + b);
+        assertThat(history).contains("What is the AWS Well-Architected Tool?").contains("and who is its audience?");
+    }
+
+    @Test
+    void anotherSessionsHistoryIsNotVisibleAfterTheRebuild() {
+        Rig rig = new Rig(false);
+        rig.coordinatorTool.set("rag_agent");
+        rig.chat.chat("tab-1", "A secret question of the first tab");
+
+        rig.connect();
+        rig.chat.chat("tab-2", "A question of the second tab");
+
+        LlmRequest last = rig.coordinatorRequests.get(rig.coordinatorRequests.size() - 1);
+        String history = last.contents().stream()
+                .flatMap(c -> c.parts().orElse(List.of()).stream()).map(p -> p.text().orElse(""))
+                .reduce("", (a, b) -> a + "\n" + b);
+        assertThat(history).contains("A question of the second tab").doesNotContain("secret question");
+    }
+
+    @Test
     void theCoordinatorSeesTheToolNamesInTheAgentDescriptionNotTheCredentials() {
         Rig rig = new Rig(true);
 

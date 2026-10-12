@@ -113,6 +113,12 @@ Decisions (user): file agent shape decided by the step 0 spike; **two paths** to
 
 <!-- Newest first. One entry per task: date, what was built, what was verified. -->
 
+### 2026-10-12: hardening 2, conversations survive a coordinator rebuild
+- Finding: `CoordinatorFactory.invalidate()` (fired by every MCP config change) built a new `InMemoryRunner`, which owns its own session service, so every conversation lost its ADK history; with `rewrite-follow-ups: false` a follow-up right after adding a server had nothing to refer to.
+- Now: one `InMemorySessionService` lives in the factory and every runner (coordinator and the per-agent runners) is a plain `Runner(root, root.name(), new InMemoryArtifactService(), sharedSessions, new InMemoryMemoryService())`, which is exactly what `InMemoryRunner` builds except for the shared session service (constructors checked with `javap` on google-adk 1.11.0). A session is keyed by app name + user + session id and the app name is the root agent's name, which does not change on a rebuild. `runner()`/`agentRunner()` now return `Runner`.
+- Tests: `CoordinatorFactoryTest.aRebuiltCoordinatorStillSeesTheSessionHistory`; `McpAnswerPathTest`: ask, add an MCP server, ask a follow-up, the rebuilt coordinator (it has `mcp_agent`) receives the first question in its history; another session's history is not visible.
+- Not changed: ADK sessions are still in memory only (a restart drops them) and are never evicted.
+
 ### 2026-10-12: hardening 1, a generic answer path for any other agent (+ sample third agent)
 - Source: the interviewer-style review. Finding: `ChatService.decide` replaced every non-rag/file/mcp agent's output with the fixed NOT_FOUND ("no verification path yet"), so a third agent was routable but mute.
 - Now: the last function response of any agent other than rag/file/mcp is shown as that agent's text (`Secrets.mask`ed), `route` = the agent name, `grounded=false`, no sources, and the API `kind` is `agent_answer`. The chat page labels it "From agent <name> · not verified against the documents". An agent that returns blank text still fails closed to NOT_FOUND with the reason in the trace. The file agent is excluded (its result comes from `FileSummaryLedger`).

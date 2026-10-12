@@ -5,7 +5,7 @@ import com.google.adk.agents.LlmAgent;
 import com.google.adk.events.Event;
 import com.google.adk.models.BaseLlm;
 import com.google.adk.models.LlmRequest;
-import com.google.adk.runner.InMemoryRunner;
+import com.google.adk.runner.Runner;
 import com.google.genai.types.Content;
 import com.google.genai.types.Part;
 import org.junit.jupiter.api.Test;
@@ -70,7 +70,7 @@ class CoordinatorFactoryTest {
         return new LlmProperties("fake", "scripted", "", coordinatorBudget, agentBudget, 12);
     }
 
-    private static List<Event> ask(InMemoryRunner runner, CoordinatorFactory factory, String question) {
+    private static List<Event> ask(Runner runner, CoordinatorFactory factory, String question) {
         String session = runner.sessionService().createSession(runner.appName(), "user-1").blockingGet().id();
         return runner.runAsync("user-1", session, Content.fromParts(Part.fromText(question)), factory.runConfig())
                 .toList().blockingGet();
@@ -186,11 +186,32 @@ class CoordinatorFactoryTest {
         CoordinatorFactory factory = new CoordinatorFactory(
                 new AgentRegistry(List.of(new DummyPlugin("dummy_a", true))), factoryFor(routingModel()), props(null, null));
 
-        InMemoryRunner first = factory.runner();
+        Runner first = factory.runner();
 
         assertThat(factory.runner()).isSameAs(first);
         factory.invalidate();
         assertThat(factory.runner()).isNotSameAs(first);
+    }
+
+    @Test
+    void aRebuiltCoordinatorStillSeesTheSessionHistory() {
+        ScriptedLlm llm = routingModel();
+        CoordinatorFactory factory = new CoordinatorFactory(
+                new AgentRegistry(List.of(new DummyPlugin("dummy_a", true))), factoryFor(llm), props(null, null));
+        Runner before = factory.runner();
+        String session = before.sessionService().createSession(before.appName(), "user-1").blockingGet().id();
+        before.runAsync("user-1", session, Content.fromParts(Part.fromText("first question")), factory.runConfig())
+                .toList().blockingGet();
+
+        factory.invalidate();
+        Runner after = factory.runner();
+        assertThat(after).isNotSameAs(before);
+        after.runAsync("user-1", session, Content.fromParts(Part.fromText("second question")), factory.runConfig())
+                .toList().blockingGet();
+
+        String lastRequest = llm.requests().stream().filter(r -> r.tools().containsKey("dummy_a"))
+                .reduce((a, b) -> b).orElseThrow().contents().toString();
+        assertThat(lastRequest).contains("first question").contains("second question");
     }
 
     @Test

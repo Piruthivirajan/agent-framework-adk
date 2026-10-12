@@ -11,7 +11,7 @@ import com.demo.agentfw.agents.rag.RagAgentPlugin;
 import com.demo.agentfw.agents.rag.RetrievalLedger;
 import com.demo.agentfw.agents.rag.SearchDocumentsTool;
 import com.google.adk.events.Event;
-import com.google.adk.runner.InMemoryRunner;
+import com.google.adk.runner.Runner;
 import com.google.genai.types.Content;
 import com.google.genai.types.FunctionResponse;
 import com.google.genai.types.Part;
@@ -155,7 +155,7 @@ public class ChatService {
         boolean attachment = fileId != null && !fileId.isBlank();
         progress.register(requestId, listener);
         try {
-            InMemoryRunner runner = attachment ? coordinators.agentRunner(FileAgentPlugin.NAME)
+            Runner runner = attachment ? coordinators.agentRunner(FileAgentPlugin.NAME)
                     : coordinators.runner();
             ensureSession(runner, sessionId);
             // a follow-up is made standalone before routing; an attachment's text is an instruction, not a question
@@ -302,7 +302,7 @@ public class ChatService {
                                          Map<String, Object> state, String requestId, long start) {
         progress.emit(requestId, "tools", "");
         try {
-            InMemoryRunner runner = coordinators.agentRunner(McpAgentPlugin.NAME);
+            Runner runner = coordinators.agentRunner(McpAgentPlugin.NAME);
             ensureSession(runner, sessionId);
             List<Event> events = runner.runAsync(USER_ID, sessionId, Content.fromParts(Part.fromText(request)),
                     coordinators.runConfig(), state).toList().blockingGet();
@@ -397,7 +397,7 @@ public class ChatService {
         return String.valueOf(value);
     }
 
-    private static void ensureSession(InMemoryRunner runner, String sessionId) {
+    private static void ensureSession(Runner runner, String sessionId) {
         boolean exists = runner.sessionService()
                 .getSession(runner.appName(), USER_ID, sessionId, Optional.empty()).blockingGet() != null;
         if (!exists) {
