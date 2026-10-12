@@ -296,13 +296,15 @@ public class ChatService {
     static final String NO_TOOL_ANSWER = "None of the connected tools could answer that.";
 
     /**
-     * The reference documents did not contain the answer (the model itself said so) and tools are
-     * connected: the question may be about their data. This is done in code because a RAG answer ends the
-     * coordinator's turn. A verification failure is not a reason: the documents had an answer.
+     * The reference documents gave no answer we can stand behind and tools are connected: the question
+     * may be about their data. "No answer" is the model saying NOT_FOUND *or* the verifier refusing what
+     * the model wrote (fail closed): either way the user has nothing from the documents, and a connected
+     * tool is a second chance, never a replacement for a verified answer. This is done in code because a
+     * RAG answer ends the coordinator's turn. A turn that failed (database down, model error) never gets
+     * here: it is an error, not a not-found.
      */
     private boolean shouldTryTools(ChatResult r) {
-        return mcp != null && mcp.hasTools() && RagAgentPlugin.NAME.equals(r.route()) && !r.grounded()
-                && r.verification().modelSaidNotFound();
+        return mcp != null && mcp.hasTools() && RagAgentPlugin.NAME.equals(r.route()) && !r.grounded();
     }
 
     private ChatResult tryConnectedTools(ChatResult ragResult, String request, String sessionId,
@@ -320,7 +322,9 @@ public class ChatService {
             List<String> toolCalls = new ArrayList<>(ragResult.toolCalls());
             toolCalls.add(McpAgentPlugin.NAME);
             ChatResult viaTools = mcpResult(lastText(events), calls, ragResult.retrievals(), toolCalls, requestId, start);
-            return viaTools.withRewrittenQuestion(ragResult.rewrittenQuestion());
+            // keep why the documents' answer was refused: the trace should show both attempts
+            return viaTools.withRewrittenQuestion(ragResult.rewrittenQuestion())
+                    .withVerification(ragResult.verification());
         } catch (RuntimeException e) {
             // the tools are a second chance: if they fail, the user still gets the honest not-found answer
             log.warn("chat request={} connected tools failed after a not-found answer: {}", requestId,

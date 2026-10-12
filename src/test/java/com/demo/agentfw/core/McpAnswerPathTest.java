@@ -219,6 +219,42 @@ class McpAnswerPathTest {
         assertThat(r.toolCalls()).containsExactly("rag_agent");
     }
 
+    private static final String UNVERIFIABLE_ANSWER = "{\"status\":\"ANSWERED\",\"claims\":[{\"text\":\"Orders ship "
+            + "in one day.\",\"ref\":\"r1c1\",\"quote\":\"a sentence that is nowhere in the retrieved chunk text\"}]}";
+
+    @Test
+    void anAnswerTheVerifierRefusesIsTreatedLikeNotFoundAndTheToolsAreTried() {
+        Rig rig = new Rig(true);
+        rig.coordinatorTool.set("rag_agent");
+        rig.ragFinal.set(UNVERIFIABLE_ANSWER);                 // fail closed: the quote is not in the chunk
+
+        ChatResult r = rig.chat.chat("tab-1", "Where is order ORD-1001?");
+
+        assertThat(r.toolCalls()).containsExactly("rag_agent", "mcp_agent");
+        assertThat(r.route()).isEqualTo("mcp_agent");
+        assertThat(r.answer()).contains("BlueFreight");
+        assertThat(r.grounded()).isFalse();
+        assertThat(r.mcp().calls().get(0).tool()).isEqualTo("lookup_order");
+        // the trace still says why the documents' answer was refused
+        assertThat(r.verification().problems()).isNotEmpty();
+        assertThat(r.retrievals()).hasSize(1);
+    }
+
+    @Test
+    void ifNoToolFitsARefusedAnswerStillEndsAsNotFoundNeverAsTheUnverifiedText() {
+        Rig rig = new Rig(true);
+        rig.coordinatorTool.set("rag_agent");
+        rig.ragFinal.set(UNVERIFIABLE_ANSWER);
+        rig.mcpTool.set(null);
+
+        ChatResult r = rig.chat.chat("tab-1", "Do orders ship in one day?");
+
+        assertThat(r.answer()).isEqualTo(GroundingVerifier.NOT_FOUND).doesNotContain("one day");
+        assertThat(r.route()).isEqualTo("rag_agent");
+        assertThat(r.verification().problems()).isNotEmpty();
+        assertThat(r.mcp()).isNull();
+    }
+
     @Test
     void withoutAnyServerTheCoordinatorIsNotOfferedTheToolsAndNothingIsTried() {
         Rig rig = new Rig(false);

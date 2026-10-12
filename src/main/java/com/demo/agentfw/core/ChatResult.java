@@ -96,6 +96,11 @@ public record ChatResult(
                 requestId, totalMillis, file, rewritten, stages, mcp);
     }
 
+    public ChatResult withVerification(Verification v) {
+        return new ChatResult(answer, route, grounded, sources, retrievals, v, toolCalls, modelOutput,
+                requestId, totalMillis, file, rewrittenQuestion, stages, mcp);
+    }
+
     public ChatResult withStages(List<StageEvent> timeline) {
         return new ChatResult(answer, route, grounded, sources, retrievals, verification, toolCalls, modelOutput,
                 requestId, totalMillis, file, rewrittenQuestion, timeline, mcp);
