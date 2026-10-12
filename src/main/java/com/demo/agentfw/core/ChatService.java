@@ -229,6 +229,13 @@ public class ChatService {
         }
         List<com.demo.agentfw.retrieval.RetrievalTrace> traces = ledger.retrievals(requestId).stream()
                 .map(RetrievalLedger.Retrieval::trace).toList();
+        Optional<RuntimeException> searchFailure = ledger.failure(requestId);
+        if (searchFailure.isPresent() && traces.isEmpty()) {
+            // the search itself broke before it found anything: say so, never "not found in the documents"
+            log.error("chat request={} search failed: {}", requestId, Secrets.mask(searchFailure.get().toString()));
+            throw new ChatFailedException("The search of the documents failed: "
+                    + searchFailure.get().getMessage(), searchFailure.get());
+        }
 
         ChatResult result;
         Optional<FileSummaryLedger.Outcome> fileOutcome = fileLedger.take(requestId);

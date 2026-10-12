@@ -37,6 +37,23 @@ public class RetrievalLedger {
     }
 
     private final Map<String, List<Retrieval>> byRequest = new LinkedHashMap<>();
+    private final Map<String, RuntimeException> failures = new LinkedHashMap<>();
+
+    /**
+     * A search that could not run (database down, embedding or reranker failure). ADK catches a tool's
+     * exception and hands the model an error text, and the model then says "not found"; recording the
+     * failure here lets the chat service tell a failed search from an empty one.
+     */
+    public synchronized void recordFailure(String requestId, RuntimeException failure) {
+        failures.put(requestId, failure);
+        while (failures.size() > MAX_REQUESTS) {
+            failures.remove(failures.keySet().iterator().next());
+        }
+    }
+
+    public synchronized Optional<RuntimeException> failure(String requestId) {
+        return Optional.ofNullable(failures.get(requestId));
+    }
 
     /** Records a retrieval and assigns references to its chunks; returns what was recorded. */
     public synchronized Retrieval register(String requestId, String query, RetrievalResult result) {
@@ -69,5 +86,6 @@ public class RetrievalLedger {
 
     public synchronized void clear(String requestId) {
         byRequest.remove(requestId);
+        failures.remove(requestId);
     }
 }

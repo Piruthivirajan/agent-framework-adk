@@ -42,6 +42,8 @@ agentfw:
     coordinator-thinking-budget: 128 # the coordinator only routes; measured against the default in docs/END_TO_END.md
     agent-thinking-budget: 0         # measured on all 48 questions: median 15.8 s -> 12.3 s, no loss of quality (docs/END_TO_END.md)
     max-llm-calls: 12                # per request: runaway-loop and cost guard
+    request-timeout-seconds: 60      # one model call, retries included; a slower call is reported as a timeout
+    retries: 1                       # extra attempts after the first, with backoff, on 429 and 503 only
   rerank:
     provider: djl                                  # "fake" is used by tests; the fake lives in src/test
     model-dir: models/ms-marco-MiniLM-L-6-v2       # gitignored; downloaded and sha256-verified on first start

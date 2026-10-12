@@ -37,20 +37,34 @@ final class ErrorMapping {
         if (t instanceof McpRegistry.NoSuchElementException e) {
             return new Mapped(HttpStatus.NOT_FOUND, new ApiError("NOT_FOUND", clean(e.getMessage())));
         }
+        // before the model mapping: a database failure inside a tool reaches here wrapped in a chat failure
+        // whose text can say "timed out", which the model mapping would call a model timeout
+        if (hasDatabaseCause(t)) {
+            return new Mapped(HttpStatus.SERVICE_UNAVAILABLE, new ApiError("DATABASE_UNAVAILABLE",
+                    "The document store is not reachable right now. Please try again in a moment."));
+        }
         if (t instanceof ChatService.ChatFailedException e) {
             return e.isUserMessage()
                     ? new Mapped(HttpStatus.BAD_GATEWAY, new ApiError("CHAT_FAILED", clean(e.getMessage())))
                     : modelFailure(e);
-        }
-        if (t instanceof MongoException || t instanceof DataAccessException) {
-            return new Mapped(HttpStatus.SERVICE_UNAVAILABLE, new ApiError("DATABASE_UNAVAILABLE",
-                    "The document store is not reachable right now. Please try again in a moment."));
         }
         if (t instanceof IllegalArgumentException e) {
             return new Mapped(HttpStatus.BAD_REQUEST, new ApiError("BAD_REQUEST", clean(e.getMessage())));
         }
         return new Mapped(HttpStatus.INTERNAL_SERVER_ERROR,
                 new ApiError("INTERNAL_ERROR", "Something went wrong on the server. Please try again."));
+    }
+
+    /** True when the throwable or anything in its cause chain is a MongoDB or Spring data-access failure. */
+    static boolean hasDatabaseCause(Throwable t) {
+        int depth = 0;
+        for (Throwable c = t; c != null && depth < 20; depth++) {
+            if (c instanceof MongoException || c instanceof DataAccessException) {
+                return true;
+            }
+            c = c.getCause() == c ? null : c.getCause();
+        }
+        return false;
     }
 
     /**

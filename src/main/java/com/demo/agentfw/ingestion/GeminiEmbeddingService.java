@@ -62,14 +62,15 @@ public class GeminiEmbeddingService implements EmbeddingService {
         for (int from = 0; from < texts.size(); from += props.batchSize()) {
             List<String> batch = texts.subList(from, Math.min(from + props.batchSize(), texts.size()));
             List<String> inputs = batch.stream().map(t -> "title: " + safeTitle + " | text: " + t).toList();
-            out.addAll(embedChecked(inputs));
+            out.addAll(embedChecked(inputs, props.maxRetries()));
         }
         return out;
     }
 
     @Override
     public float[] embedQuery(String query) {
-        return embedChecked(List.of("task: search result | query: " + query)).get(0);
+        // a person is waiting: one retry, not the five that ingestion can afford
+        return embedChecked(List.of("task: search result | query: " + query), Math.min(1, props.maxRetries())).get(0);
     }
 
     @Override
@@ -82,8 +83,8 @@ public class GeminiEmbeddingService implements EmbeddingService {
         return props.dimensions();
     }
 
-    private List<float[]> embedChecked(List<String> inputs) {
-        List<float[]> vectors = callWithRetry(inputs);
+    private List<float[]> embedChecked(List<String> inputs, int maxRetries) {
+        List<float[]> vectors = callWithRetry(inputs, maxRetries);
         if (vectors.size() != inputs.size()) {
             throw new IllegalStateException("Embedding model returned " + vectors.size()
                     + " vectors for " + inputs.size() + " inputs");
@@ -97,17 +98,17 @@ public class GeminiEmbeddingService implements EmbeddingService {
         return vectors;
     }
 
-    private List<float[]> callWithRetry(List<String> inputs) {
+    private List<float[]> callWithRetry(List<String> inputs, int maxRetries) {
         for (int attempt = 0; ; attempt++) {
             try {
                 return caller.embed(inputs);
             } catch (RuntimeException e) {
-                if (!isRetryable(e) || attempt >= props.maxRetries()) {
+                if (!isRetryable(e) || attempt >= maxRetries) {
                     throw e;
                 }
                 long waitMs = Math.min(MAX_BACKOFF_MS, 1000L << attempt);
                 log.warn("Embedding call failed ({}), retry {}/{} in {} ms",
-                        describe(e), attempt + 1, props.maxRetries(), waitMs);
+                        describe(e), attempt + 1, maxRetries, waitMs);
                 try {
                     sleeper.sleep(waitMs);
                 } catch (InterruptedException ie) {
@@ -135,7 +136,12 @@ public class GeminiEmbeddingService implements EmbeddingService {
             throw new IllegalStateException(
                     "No Gemini API key: set GOOGLE_API_KEY in .env (see .env.example) or the environment.");
         }
-        Client client = Client.builder().apiKey(props.apiKey()).build();
+        // a timeout for each call; no client-level retry, the retry loop above is the only one (otherwise the
+        // genai client's own default of 5 attempts would multiply with it)
+        Client client = Client.builder().apiKey(props.apiKey())
+                .httpOptions(com.demo.agentfw.core.GeminiLimits.httpOptions(
+                        com.demo.agentfw.core.GeminiLimits.DEFAULT_TIMEOUT_SECONDS, 0))
+                .build();
         EmbedContentConfig config = EmbedContentConfig.builder().outputDimensionality(props.dimensions()).build();
         String model = props.model();
         return inputs -> {

@@ -75,7 +75,17 @@ public class SearchDocumentsTool {
             return refusal("NO_RELEVANT_CONTEXT", "The first search found nothing relevant in the documents. "
                     + "Do not search again: reply {\"status\":\"NOT_FOUND\"}.");
         }
-        RetrievalResult result = retrieval.retrieve(query, stage -> progress.emit(requestId, stage, ""));
+        RetrievalResult result;
+        try {
+            result = retrieval.retrieve(query, stage -> progress.emit(requestId, stage, ""));
+        } catch (RuntimeException e) {
+            // never let this look like "the documents have no answer": the chat service reads the ledger
+            ledger.recordFailure(requestId, e);
+            log.warn("search_documents request={} failed: {}", requestId,
+                    com.demo.agentfw.core.Secrets.mask(e.getClass().getSimpleName()));
+            return refusal("SEARCH_FAILED", "The search could not be run. Do not search again and do not answer "
+                    + "from your own knowledge: reply {\"status\":\"NOT_FOUND\"}.");
+        }
         progress.emit(requestId, "answering", "");
         RetrievalLedger.Retrieval recorded = ledger.register(requestId, query, result);
         log.info("search_documents request={} retrieval={} decision={} chunks={}", requestId, recorded.id(),

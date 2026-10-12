@@ -14,10 +14,17 @@ import org.springframework.stereotype.Component;
 public class GeminiModelFactory implements ModelFactory {
 
     private final LlmProperties props;
+    private final LlmLimitsProperties limits;
     private BaseLlm model;
 
-    public GeminiModelFactory(LlmProperties props) {
+    @org.springframework.beans.factory.annotation.Autowired
+    public GeminiModelFactory(LlmProperties props, LlmLimitsProperties limits) {
         this.props = props;
+        this.limits = limits;
+    }
+
+    public GeminiModelFactory(LlmProperties props) {
+        this(props, LlmLimitsProperties.defaults());
     }
 
     @Override
@@ -27,7 +34,9 @@ public class GeminiModelFactory implements ModelFactory {
                 throw new IllegalStateException(
                         "No Gemini API key: set GOOGLE_API_KEY in .env (see .env.example) or the environment.");
             }
-            model = new Gemini(props.model(), props.apiKey());
+            // every call, whoever makes it, has a timeout and at most the configured retries on 429/503
+            model = new LimitedLlm(new Gemini(props.model(), props.apiKey()), limits.requestTimeoutSeconds(),
+                    limits.retries());
         }
         return model;
     }
