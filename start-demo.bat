@@ -103,7 +103,7 @@ if "%CODE%"=="200" (
 )
 echo [4/5] Starting the application in its own window. The first start takes a few minutes: it builds,
 echo       downloads the rerank model, and embeds the documents if the database is empty.
-start "Agent Framework app" cmd /k "mvnw.cmd spring-boot:run"
+start "Agent Framework app" powershell -NoExit -NoProfile -Command "$Host.UI.RawUI.WindowTitle='Agent Framework app'; .\mvnw.cmd spring-boot:run"
 set /a TRIES=0
 :waitapp
 set "CODE=0"
