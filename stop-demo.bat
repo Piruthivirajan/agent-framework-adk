@@ -6,16 +6,40 @@ cd /d "%~dp0"
 title Agent Framework - stop
 
 echo Stopping the application and the demo MCP server...
-for %%p in (8080 8099) do (
-  for /f "tokens=5" %%i in ('netstat -ano ^| findstr /c:":%%p " ^| findstr /c:"LISTENING"') do (
-    taskkill /pid %%i /t /f >nul 2>&1
-  )
-)
-taskkill /fi "WINDOWTITLE eq Agent Framework app*" /t /f >nul 2>&1
-taskkill /fi "WINDOWTITLE eq Demo MCP server*" /t /f >nul 2>&1
+
+rem Prefer PowerShell: netstat token parsing breaks on some Windows builds; also kill by command line.
+powershell -NoProfile -ExecutionPolicy Bypass -Command ^
+  "$ErrorActionPreference='SilentlyContinue';" ^
+  "foreach ($port in 8080,8099) {" ^
+  "  Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue |" ^
+  "    ForEach-Object { Stop-Process -Id $_.OwningProcess -Force -ErrorAction SilentlyContinue }" ^
+  "};" ^
+  "Get-CimInstance Win32_Process | Where-Object {" ^
+  "  $_.Name -eq 'java.exe' -and $_.ProcessId -ne $PID -and $_.CommandLine -match 'DemoMcpServer|spring-boot|AgentFrameworkApplication'" ^
+  "} | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }"
+
+rem Close the windows start-demo.bat opened (taskkill WINDOWTITLE does not support * wildcards).
+taskkill /FI "WINDOWTITLE eq Agent Framework app" /T /F >nul 2>&1
+taskkill /FI "WINDOWTITLE eq Demo MCP server" /T /F >nul 2>&1
 
 echo Stopping MongoDB...
-docker compose stop >nul 2>&1
+docker compose stop
+if errorlevel 1 (
+  echo [!] docker compose stop failed. Is Docker running?
+) else (
+  echo       MongoDB container stopped.
+)
 
-echo Done.
+set "STILL="
+for %%p in (8080 8099) do (
+  netstat -ano | findstr /c:":%%p " | findstr /c:"LISTENING" >nul 2>&1
+  if not errorlevel 1 set "STILL=1"
+)
+if defined STILL (
+  echo [!] Ports 8080 or 8099 are still in use. Close any leftover Java or "Agent Framework app" window,
+  echo     or run Task Manager and end java.exe on those ports.
+) else (
+  echo Done. Ports 8080 and 8099 are free.
+)
+
 if not defined NO_PAUSE pause
