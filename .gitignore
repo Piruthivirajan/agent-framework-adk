@@ -78,3 +78,5 @@ venv/
 /tmp/
 /uploads/
 /data/
+/models/ms-marco-MiniLM-L-6-v2/model.onnx
+/models/ms-marco-MiniLM-L-6-v2/model_quint8_avx2.onnx
