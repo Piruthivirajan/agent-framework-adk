@@ -42,3 +42,40 @@ build/
 ### Corpus and models (downloaded by scripts, never committed) ###
 /corpus/
 /models/
+
+### Secrets: any env file except the example ###
+.env.*
+!.env.example
+
+### Logs, dumps and runtime output ###
+*.log
+nohup.out
+*.pid
+hs_err_pid*
+*.hprof
+/logs/
+
+### OS and editor junk ###
+.DS_Store
+Thumbs.db
+desktop.ini
+*~
+*.swp
+*.bak
+*.tmp
+
+### Python (live-check and benchmark scripts) ###
+__pycache__/
+*.pyc
+.pytest_cache/
+.venv/
+venv/
+
+### Local tool state (per-machine settings, not part of the project) ###
+.claude/
+
+### Local scratch and runtime data ###
+/scratch/
+/tmp/
+/uploads/
+/data/
