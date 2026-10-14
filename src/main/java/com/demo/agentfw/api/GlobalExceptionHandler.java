@@ -12,6 +12,7 @@ import org.springframework.web.bind.MissingServletRequestParameterException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.multipart.MaxUploadSizeExceededException;
+import org.springframework.web.servlet.resource.NoResourceFoundException;
 import org.springframework.web.multipart.support.MissingServletRequestPartException;
 
 import java.util.Locale;
@@ -47,6 +48,12 @@ class GlobalExceptionHandler {
     ResponseEntity<ApiError> unreadable(Exception e) {
         return json(HttpStatus.BAD_REQUEST, new ApiError("BAD_REQUEST",
                 "The request is incomplete or not valid JSON."));
+    }
+
+    @ExceptionHandler(NoResourceFoundException.class)
+    ResponseEntity<ApiError> missingStaticResource(NoResourceFoundException e) {
+        // Browsers request /favicon.ico even when the page has no icon; not an application failure.
+        return json(HttpStatus.NOT_FOUND, new ApiError("NOT_FOUND", "Not found."));
     }
 
     @ExceptionHandler(Exception.class)

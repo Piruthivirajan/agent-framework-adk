@@ -42,4 +42,8 @@ if defined STILL (
   echo Done. Ports 8080 and 8099 are free.
 )
 
-if not defined NO_PAUSE pause
+if defined STILL (
+  pause
+  exit 1
+)
+exit 0

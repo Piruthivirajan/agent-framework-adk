@@ -2,7 +2,7 @@
 rem One-click local start: MongoDB (Docker), corpus, demo MCP server, the application, and the browser.
 rem Double-click this file. Needs: Java 21, Docker Desktop (running), Git for Windows (bash, for the corpus
 rem download on the first run) and a Gemini key in .env. Run stop-demo.bat to stop everything.
-rem Environment switches for scripted use: NO_BROWSER=1 (do not open the browser), NO_PAUSE=1.
+rem Environment switch: NO_BROWSER=1 (do not open the browser). This window closes automatically on success.
 setlocal EnableExtensions
 cd /d "%~dp0"
 title Agent Framework - start
@@ -64,7 +64,7 @@ if %TRIES% GEQ 60 (
   echo [X] MongoDB did not become healthy in 5 minutes.
   goto :fail
 )
-timeout /t 5 /nobreak >nul
+ping -n 6 127.0.0.1 >nul
 goto :waitmongo
 :mongook
 echo       MongoDB is healthy.
@@ -95,26 +95,24 @@ if errorlevel 1 (
 rem ---- 4. the application ----------------------------------------------------------------------------
 set "AGENTFW_MCP_ALLOWED_HOSTS=localhost"
 set "AGENTFW_INGESTION_ON_STARTUP=true"
-set "CODE=0"
-for /f %%s in ('powershell -NoProfile -Command "try { (Invoke-WebRequest -UseBasicParsing http://localhost:8080/actuator/health -TimeoutSec 3).StatusCode } catch { 0 }"') do set "CODE=%%s"
+call :healthcode CODE
 if "%CODE%"=="200" (
   echo [4/5] The application is already running.
   goto :open
 )
-echo [4/5] Starting the application in its own window. The first start takes a few minutes: it builds,
-echo       downloads the rerank model, and embeds the documents if the database is empty.
-start "Agent Framework app" powershell -NoExit -NoProfile -Command "$Host.UI.RawUI.WindowTitle='Agent Framework app'; .\mvnw.cmd spring-boot:run"
+echo [4/5] Starting the application (minimized window). First start takes a few minutes:
+echo       build, rerank model download, document embedding if the database is empty.
+start "Agent Framework app" /MIN cmd /k "cd /d "%~dp0" && set AGENTFW_MCP_ALLOWED_HOSTS=localhost && set AGENTFW_INGESTION_ON_STARTUP=true && mvnw.cmd spring-boot:run"
 set /a TRIES=0
 :waitapp
-set "CODE=0"
-for /f %%s in ('powershell -NoProfile -Command "try { (Invoke-WebRequest -UseBasicParsing http://localhost:8080/actuator/health -TimeoutSec 3).StatusCode } catch { 0 }"') do set "CODE=%%s"
+call :healthcode CODE
 if "%CODE%"=="200" goto :open
 set /a TRIES+=1
 if %TRIES% GEQ 90 (
-  echo [X] The application did not become healthy in 15 minutes. Look at the "Agent Framework app" window.
+  echo [X] The application did not become healthy in 15 minutes. Check the minimized "Agent Framework app" window.
   goto :fail
 )
-timeout /t 10 /nobreak >nul
+ping -n 11 127.0.0.1 >nul
 goto :waitapp
 
 :open
@@ -133,11 +131,18 @@ echo  wait until the app window says "Ingestion finished" before asking about th
 echo.
 echo  Stop everything with stop-demo.bat.
 echo ------------------------------------------------
-if not defined NO_PAUSE pause
-exit /b 0
+exit 0
 
 :fail
 echo.
 echo Start was not completed.
-if not defined NO_PAUSE pause
-exit /b 1
+pause
+exit 1
+
+rem Sets %%~1 to 200 when /actuator/health is up, else 0 (curl only; no PowerShell window).
+:healthcode
+set "%~1=0"
+where curl >nul 2>&1
+if errorlevel 1 exit /b 0
+for /f %%s in ('curl -s -o NUL -w "%%{http_code}" http://localhost:8080/actuator/health 2^>NUL') do set "%~1=%%s"
+exit /b 0
