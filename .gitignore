@@ -39,9 +39,8 @@ build/
 ### Secrets ###
 .env
 
-### Corpus and models (downloaded by scripts, never committed) ###
+### Corpus (downloaded by scripts, never committed) ###
 /corpus/
-/models/
 
 ### Secrets: any env file except the example ###
 .env.*
